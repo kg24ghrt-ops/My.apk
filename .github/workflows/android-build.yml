@@ -1,0 +1,74 @@
+name: Android CI/CD Build and Upload APK
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    name: Build & Push Release APK
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    steps:
+      # 1. Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      # 2. Set up JDK 17
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 3. Set up Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+        with:
+          api-level: 35
+          build-tools: 35.0.1
+
+      # 4. Make Gradle Wrapper executable
+      - name: Make Gradle Wrapper executable
+        run: chmod +x ./gg/gradlew
+
+      # 5. Build Release APK
+      - name: Build Release APK
+        run: |
+          cd gg
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/vkk/keystore/my-release-key.jks \
+            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASSWORD
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      # 6. Copy APK to vkk/apk with timestamp
+      - name: Copy APK with timestamp
+        run: |
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+          mkdir -p vkk/apk
+          cp gg/app/build/outputs/apk/release/app-release.apk vkk/apk/app-release-$TIMESTAMP.apk
+
+      # 7. Commit & Push APK to a separate branch using GH_TOKEN
+      - name: Commit & Push APK to public repo
+        run: |
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git checkout -B apk-artifacts
+          git add vkk/apk/
+          git commit -m "Add APK $TIMESTAMP"
+          git push https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/kg24ghrt-ops/My.apk.git apk-artifacts --force
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
