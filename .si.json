@@ -10,6 +10,10 @@
     ".gradle": {
       "enabled": true,
       "run": "groovy-language-server"
+    },
+    ".json": {
+      "enabled": true,
+      "run": "vscode-json-language-server --stdio"
     }
   }
 }

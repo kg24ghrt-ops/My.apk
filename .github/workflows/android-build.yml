@@ -44,6 +44,14 @@ jobs:
           fi
           chmod +x ./gradlew
 
+      # 4a. Decode keystore from secret
+      - name: Decode Keystore
+        run: |
+          mkdir -p vkk/keystore
+          echo "$KEYSTORE_BASE64" | base64 --decode > vkk/keystore/my-release-key.jks
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
       # 5. Build Release APK
       - name: Build Release APK
         run: |
