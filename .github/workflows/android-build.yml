@@ -11,15 +11,10 @@ jobs:
     name: Build & Upload Debug APK
     runs-on: ubuntu-latest
 
-    env:
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
     steps:
       # 1. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
 
       # 2. Setup JDK 17
       - name: Set up JDK 17
@@ -28,14 +23,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # 3. Setup Android SDK
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-        with:
-          api-level: 35
-          build-tools: 35.0.1
-
-      # 4. Ensure Gradle Wrapper exists
+      # 3. Ensure Gradle Wrapper exists
       - name: Ensure Gradle Wrapper
         run: |
           if [ ! -f ./gradlew ]; then
@@ -43,23 +31,18 @@ jobs:
           fi
           chmod +x ./gradlew
 
-      # 5. Set timestamp environment variable
-      - name: Set timestamp
-        run: echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
-
-      # 6. Build debug APK
+      # 4. Build debug APK
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
-
-      # 7. Copy APK with timestamp
-      - name: Copy APK with timestamp
         run: |
+          ./gradlew clean assembleDebug
           mkdir -p vkk/apk
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
           cp app/build/outputs/apk/debug/app-debug.apk vkk/apk/app-debug-$TIMESTAMP.apk
+          echo "APK_PATH=vkk/apk/app-debug-$TIMESTAMP.apk" >> $GITHUB_ENV
 
-      # 8. Upload APK as artifact
-      - name: Upload APK Artifact
+      # 5. Upload APK as artifact
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Debug-APK-$TIMESTAMP
-          path: vkk/apk/app-debug-$TIMESTAMP.apk
+          name: Debug-APK
+          path: ${{ env.APK_PATH }}
