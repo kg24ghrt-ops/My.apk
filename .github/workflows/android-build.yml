@@ -43,10 +43,9 @@ jobs:
           fi
           chmod +x ./gradlew
 
-      # 5. Build unsigned release APK
+      # 5. Build unsigned release APK (skip signing)
       - name: Build Unsigned APK
-        run: |
-          ./gradlew assembleRelease -x signRelease
+        run: ./gradlew assembleRelease -x signRelease
 
       # 6. Copy APK to vkk/apk with timestamp
       - name: Copy APK with timestamp
@@ -54,10 +53,11 @@ jobs:
           TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
           mkdir -p vkk/apk
           cp app/build/outputs/apk/release/app-release-unsigned.apk vkk/apk/app-release-unsigned-$TIMESTAMP.apk
+        shell: bash
 
       # 7. Upload APK as workflow artifact
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: Unsigned-APK-$TIMESTAMP
-          path: vkk/apk/app-release-unsigned-$TIMESTAMP.apk
+          name: Unsigned-APK-${{ github.run_id }}
+          path: vkk/apk/app-release-unsigned-*.apk
