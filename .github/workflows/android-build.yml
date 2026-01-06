@@ -1,4 +1,4 @@
-name: Android CI/CD Build and Upload APK
+name: Android CI/CD Build Unsigned APK
 
 on:
   push:
@@ -8,14 +8,14 @@ on:
 
 jobs:
   build:
-    name: Build & Push Release APK
+    name: Build & Upload Unsigned APK
     runs-on: ubuntu-latest
 
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
-      # 1. Checkout your code
+      # 1. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
@@ -35,7 +35,7 @@ jobs:
           api-level: 35
           build-tools: 35.0.1
 
-      # 4. Generate Gradle Wrapper if missing
+      # 4. Ensure Gradle Wrapper exists
       - name: Ensure Gradle Wrapper
         run: |
           if [ ! -f ./gradlew ]; then
@@ -43,42 +43,21 @@ jobs:
           fi
           chmod +x ./gradlew
 
-      # 4a. Decode keystore from secret
-      - name: Decode Keystore
+      # 5. Build unsigned release APK
+      - name: Build Unsigned APK
         run: |
-          mkdir -p vkk/keystore
-          echo "$KEYSTORE_BASE64" | base64 --decode > vkk/keystore/my-release-key.jks
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-
-      # 5. Build Release APK
-      - name: Build Release APK
-        run: |
-          ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/vkk/keystore/my-release-key.jks \
-            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$KEY_PASSWORD
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          ./gradlew assembleRelease -x signRelease
 
       # 6. Copy APK to vkk/apk with timestamp
       - name: Copy APK with timestamp
         run: |
           TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
           mkdir -p vkk/apk
-          cp app/build/outputs/apk/release/app-release.apk vkk/apk/app-release-$TIMESTAMP.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk vkk/apk/app-release-unsigned-$TIMESTAMP.apk
 
-      # 7. Commit & Push APK to separate branch using GH_TOKEN
-      - name: Commit & Push APK to public repo
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-          git checkout -B apk-artifacts
-          git add vkk/apk/
-          git commit -m "Add APK $TIMESTAMP"
-          git push https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/kg24ghrt-ops/My.apk.git apk-artifacts --force
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      # 7. Upload APK as workflow artifact
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Unsigned-APK-$TIMESTAMP
+          path: vkk/apk/app-release-unsigned-$TIMESTAMP.apk
