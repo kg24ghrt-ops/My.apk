@@ -43,18 +43,21 @@ jobs:
           fi
           chmod +x ./gradlew
 
-      # 5. Build debug APK (automatically signed)
+      # 5. Set timestamp environment variable
+      - name: Set timestamp
+        run: echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+
+      # 6. Build debug APK
       - name: Build Debug APK
         run: ./gradlew assembleDebug
 
-      # 6. Copy APK to vkk/apk with timestamp
+      # 7. Copy APK with timestamp
       - name: Copy APK with timestamp
         run: |
-          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
           mkdir -p vkk/apk
           cp app/build/outputs/apk/debug/app-debug.apk vkk/apk/app-debug-$TIMESTAMP.apk
 
-      # 7. Upload APK as workflow artifact
+      # 8. Upload APK as artifact
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
