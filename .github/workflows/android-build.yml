@@ -38,7 +38,6 @@ jobs:
       # 4. Generate Gradle Wrapper if missing
       - name: Ensure Gradle Wrapper
         run: |
-          cd gg
           if [ ! -f ./gradlew ]; then
             gradle wrapper
           fi
@@ -55,7 +54,6 @@ jobs:
       # 5. Build Release APK
       - name: Build Release APK
         run: |
-          cd gg
           ./gradlew assembleRelease \
             -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/vkk/keystore/my-release-key.jks \
             -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
@@ -71,7 +69,7 @@ jobs:
         run: |
           TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
           mkdir -p vkk/apk
-          cp gg/app/build/outputs/apk/release/app-release.apk vkk/apk/app-release-$TIMESTAMP.apk
+          cp app/build/outputs/apk/release/app-release.apk vkk/apk/app-release-$TIMESTAMP.apk
 
       # 7. Commit & Push APK to separate branch using GH_TOKEN
       - name: Commit & Push APK to public repo
