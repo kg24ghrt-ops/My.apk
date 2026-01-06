@@ -1,4 +1,4 @@
-name: Android CI/CD Build Unsigned APK
+name: Android CI/CD Build Debug APK
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build & Upload Unsigned APK
+    name: Build & Upload Debug APK
     runs-on: ubuntu-latest
 
     env:
@@ -43,22 +43,20 @@ jobs:
           fi
           chmod +x ./gradlew
 
-      # 5. Build unsigned release APK
-      - name: Build Unsigned APK
-        run: |
-          ./gradlew assembleRelease -x signRelease
+      # 5. Build debug APK (automatically signed)
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug
 
       # 6. Copy APK to vkk/apk with timestamp
       - name: Copy APK with timestamp
         run: |
           TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
           mkdir -p vkk/apk
-          cp app/build/outputs/apk/release/app-release-unsigned.apk vkk/apk/app-release-unsigned-$TIMESTAMP.apk
-          echo "APK_PATH=vkk/apk/app-release-unsigned-$TIMESTAMP.apk" >> $GITHUB_ENV
+          cp app/build/outputs/apk/debug/app-debug.apk vkk/apk/app-debug-$TIMESTAMP.apk
 
-      # 7. Upload APK as workflow artifact (v4)
+      # 7. Upload APK as workflow artifact
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Unsigned-APK-${{ github.run_id }}
-          path: ${{ env.APK_PATH }}
+          name: Debug-APK-$TIMESTAMP
+          path: vkk/apk/app-debug-$TIMESTAMP.apk
