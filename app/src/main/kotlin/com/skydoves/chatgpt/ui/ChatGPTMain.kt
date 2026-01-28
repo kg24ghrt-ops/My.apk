@@ -34,12 +34,12 @@ fun ChatGPTMain(context: Context) {
                     Text(
                         text = "You: $prompt",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFFEEEEEE)
+                        color = Color(0xFFEEEEEE) // user text color
                     )
                     Text(
                         text = "AI: $response",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFF00BCD4)
+                        color = Color(0xFF00BCD4) // AI text color
                     )
                 }
             }
@@ -57,12 +57,12 @@ fun ChatGPTMain(context: Context) {
                 value = inputText,
                 onValueChange = { inputText = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Enter your prompt") },
-                colors = TextFieldDefaults.outlinedTextFieldColors(
+                placeholder = { Text("Enter your prompt", color = Color(0xFFAAAAAA)) },
+                colors = TextFieldDefaults.textFieldColors(
                     textColor = Color.White,
-                    placeholderColor = Color(0xFFAAAAAA),
                     cursorColor = Color.Cyan,
-                    containerColor = Color(0xFF1E1E1E)
+                    containerColor = Color(0xFF1E1E1E),
+                    placeholderColor = Color(0xFFAAAAAA)
                 )
             )
 
