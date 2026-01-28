@@ -61,7 +61,8 @@ fun ChatGPTMain(context: Context) {
                 colors = TextFieldDefaults.textFieldColors(
                     textColor = Color.White,
                     containerColor = Color(0xFF1E1E1E),
-                    placeholderColor = Color(0xFFAAAAAA)
+                    placeholderColor = Color(0xFFAAAAAA),
+                    cursorColor = Color.Cyan
                 )
             )
 
