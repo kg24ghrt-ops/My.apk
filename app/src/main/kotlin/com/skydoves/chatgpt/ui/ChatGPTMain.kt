@@ -57,12 +57,11 @@ fun ChatGPTMain(context: Context) {
                 value = inputText,
                 onValueChange = { inputText = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Enter your prompt") },
-                colors = TextFieldDefaults.textFieldColors(
+                placeholder = { Text("Enter your prompt", color = Color(0xFFAAAAAA)) },
+                colors = TextFieldDefaults.outlinedTextFieldColors(
                     textColor = Color.White,
-                    containerColor = Color(0xFF1E1E1E),
-                    placeholderColor = Color(0xFFAAAAAA),
-                    cursorColor = Color.Cyan
+                    cursorColor = Color.Cyan,
+                    containerColor = Color(0xFF1E1E1E)
                 )
             )
 
