@@ -1,29 +1,26 @@
 package com.skydoves.chatgpt.feature.chat
 
 import android.content.Context
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.skydoves.chatgpt.BrowserAIManager
-import kotlinx.coroutines.launch
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 
-class ChatViewModel(private val context: Context) : ViewModel() {
+class ChatViewModel(context: Context) {
 
-    // You can keep chat history if you want to display locally
-    val chatHistory = mutableListOf<Pair<String, String>>() // Pair<Prompt, Response>
+    // Chat history: Pair<Prompt, Response>
+    val chatHistory: SnapshotStateList<Pair<String, String>> = mutableStateListOf()
 
     /**
-     * Sends a prompt to AI via BrowserAIManager instead of API.
+     * Sends a prompt to AI via custom browser tab (stub for now)
      */
     fun sendPrompt(prompt: String) {
         if (prompt.isEmpty()) return
 
         // Add prompt locally for UI display
-        chatHistory.add(Pair(prompt, "Waiting for AI response in browser tab..."))
+        chatHistory.add(prompt to "Waiting for AI response...")
 
-        // Launch the browser tab
-        viewModelScope.launch {
-            BrowserAIManager(context)
-                .openAIChat("https://chat.openai.com/") // Replace with Gemini URL if needed
-        }
+        // TODO: Implement actual custom browser tab logic
+        // For now, simulate an AI response:
+        val fakeResponse = "AI response for: $prompt"
+        chatHistory.add(prompt to fakeResponse)
     }
 }
