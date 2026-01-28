@@ -89,12 +89,15 @@ secrets {
 }
 
 dependencies {
-  
+
   // core modules
   implementation(project(":core-designsystem"))
   implementation(project(":core-navigation"))
   implementation(project(":core-data"))
-  implementation "androidx.browser:browser:1.5.0"
+
+  // browser
+  implementation("androidx.browser:browser:1.5.0")
+
   // feature modules
   implementation(project(":feature-chat"))
   implementation(project(":feature-login"))
@@ -132,10 +135,7 @@ dependencies {
 
   // baseline profile
   baselineProfile(project(":benchmark"))
-   
-  
 }
-
 if (file("google-services.json").exists()) {
   apply(plugin = libs.plugins.gms.googleServices.get().pluginId)
   apply(plugin = libs.plugins.firebase.crashlytics.get().pluginId)
