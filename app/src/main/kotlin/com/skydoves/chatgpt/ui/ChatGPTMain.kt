@@ -3,6 +3,7 @@ package com.skydoves.chatgpt.ui
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
@@ -10,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import com.skydoves.chatgpt.feature.chat.ChatViewModel
 
@@ -26,8 +28,11 @@ fun ChatGPTMain(context: Context) {
     ) {
         // Chat History
         LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            reverseLayout = true
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            reverseLayout = true,
+            verticalArrangement = Arrangement.Top
         ) {
             items(chatViewModel.chatHistory.reversed()) { (prompt, response) ->
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -47,24 +52,40 @@ fun ChatGPTMain(context: Context) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Input Row
+        // Input Row with BasicTextField (version-safe)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextField(
-                value = inputText,
-                onValueChange = { inputText = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Enter your prompt", color = Color(0xFFAAAAAA)) },
-                colors = TextFieldDefaults.textFieldColors(
-                    textColor = Color.White,
-                    cursorColor = Color.Cyan,
-                    containerColor = Color(0xFF1E1E1E),
-                    placeholderColor = Color(0xFFAAAAAA)
-                )
-            )
+            // Container for input so we can style background
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .background(Color(0xFF1E1E1E))
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                val textStyle = TextStyle(color = Color.White)
+                BasicTextField(
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    singleLine = true,
+                    textStyle = textStyle,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                ) { innerTextField ->
+                    // Placeholder handling
+                    if (inputText.isEmpty()) {
+                        Text(
+                            text = "Enter your prompt",
+                            color = Color(0xFFAAAAAA),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    innerTextField()
+                }
+            }
 
             Button(onClick = {
                 if (inputText.isNotBlank()) {
