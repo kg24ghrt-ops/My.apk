@@ -7,66 +7,92 @@ import com.skydoves.chatgpt.data.entity.PromptFileEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.InputStreamReader
+import java.nio.charset.StandardCharsets
 
-class PromptRepository(private val context: Context) {
-  private val db = AppDatabase.getInstance(context)
+class PromptRepository(context: Context) {
+
+  private val appContext = context.applicationContext
+  private val db = AppDatabase.getInstance(appContext)
   private val dao = db.promptFileDao()
 
-  fun allFilesFlow() = dao.getAllFlow()
+  fun observeAllFiles() = dao.observeAll()
 
   suspend fun getById(id: Long) = dao.getById(id)
 
   /**
-   * Copies the content from the provided Uri into app internal storage, and inserts metadata record.
-   * Returns the newly inserted entity ID.
+   * Import a file URI into internal storage and store metadata only.
    */
-  suspend fun importUriAsFile(uri: Uri, displayName: String?, descriptionPlaceholder: String? = null): Long {
-    return withContext(Dispatchers.IO) {
-      val inStream = context.contentResolver.openInputStream(uri)
-        ?: throw IllegalArgumentException("Cannot open URI")
-      val safeName = (displayName ?: "file_${System.currentTimeMillis()}").replace(Regex("[^a-zA-Z0-9._-]"), "_")
-      val outFile = File(context.filesDir, "imported_$safeName")
-      outFile.outputStream().use { out -> inStream.copyTo(out) }
-      val size = outFile.length()
-      val entity = PromptFileEntity(
-        displayName = displayName ?: safeName,
-        filePath = outFile.absolutePath,
-        language = null,
-        fileSizeBytes = size
-      )
-      dao.insert(entity)
-    }
+  suspend fun importUriAsFile(
+    uri: Uri,
+    displayName: String?
+  ): Long = withContext(Dispatchers.IO) {
+
+    val safeName = (displayName ?: "file_${System.currentTimeMillis()}")
+      .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+
+    val outFile = File(appContext.filesDir, "imported_$safeName")
+
+    appContext.contentResolver.openInputStream(uri)?.use { input ->
+      outFile.outputStream().use { output ->
+        input.copyTo(output)
+      }
+    } ?: throw IllegalArgumentException("Cannot open URI: $uri")
+
+    val entity = PromptFileEntity(
+      displayName = displayName ?: safeName,
+      filePath = outFile.absolutePath,
+      language = guessLanguageFromName(safeName),
+      fileSizeBytes = outFile.length()
+    )
+
+    dao.insert(entity)
   }
 
-  suspend fun delete(entity: PromptFileEntity) {
-    withContext(Dispatchers.IO) {
-      dao.delete(entity)
-      try { File(entity.filePath).delete() } catch (_: Exception) {}
-    }
+  suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {
+    dao.deleteById(entity.id)
+    runCatching { File(entity.filePath).delete() }
   }
 
   /**
-   * Read a preview chunk of the file (up to chunkSize characters) starting at offsetBytes.
-   * Returns Pair(text, nextOffsetBytes) where nextOffsetBytes == -1 means EOF.
+   * Reads a UTF-8 safe chunk of a file.
+   * Never loads full file into memory.
    */
-  suspend fun readChunk(entity: PromptFileEntity, offsetBytes: Long, chunkSizeBytes: Int): Pair<String, Long> {
-    return withContext(Dispatchers.IO) {
-      val file = File(entity.filePath)
-      if (!file.exists()) return@withContext Pair("", -1L)
-      val raf = java.io.RandomAccessFile(file, "r")
-      try {
-        if (offsetBytes >= raf.length()) return@withContext Pair("", -1L)
-        raf.seek(offsetBytes)
-        val toRead = minOf(chunkSizeBytes, (raf.length() - offsetBytes).toInt())
-        val bytes = ByteArray(toRead)
-        val actuallyRead = raf.read(bytes)
-        val text = String(bytes, 0, maxOf(0, actuallyRead))
-        val next = offsetBytes + actuallyRead
-        val nextOffset = if (next >= raf.length()) -1L else next
-        Pair(text, nextOffset)
-      } finally {
-        try { raf.close() } catch (_: Exception) {}
-      }
+  suspend fun readChunk(
+    entity: PromptFileEntity,
+    offsetBytes: Long,
+    chunkSizeBytes: Int
+  ): Pair<String, Long> = withContext(Dispatchers.IO) {
+
+    val file = File(entity.filePath)
+    if (!file.exists()) return@withContext "" to -1L
+
+    val raf = file.inputStream()
+    try {
+      raf.skip(offsetBytes)
+
+      val reader = InputStreamReader(raf, StandardCharsets.UTF_8)
+      val buffer = CharArray(chunkSizeBytes)
+      val read = reader.read(buffer)
+
+      if (read <= 0) return@withContext "" to -1L
+
+      val nextOffset = offsetBytes + read
+      buffer.concatToString(0, read) to
+        if (nextOffset >= file.length()) -1L else nextOffset
+    } finally {
+      try { raf.close() } catch (_: Exception) {}
     }
   }
+
+  private fun guessLanguageFromName(name: String): String? =
+    when {
+      name.endsWith(".kt") -> "kotlin"
+      name.endsWith(".java") -> "java"
+      name.endsWith(".xml") -> "xml"
+      name.endsWith(".json") -> "json"
+      name.endsWith(".md") -> "markdown"
+      name.endsWith(".py") -> "python"
+      else -> null
+    }
 }
