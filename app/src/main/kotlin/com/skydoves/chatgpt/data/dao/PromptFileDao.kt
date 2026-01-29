@@ -11,18 +11,18 @@ import com.skydoves.chatgpt.data.entity.PromptFileEntity
 @Dao
 interface PromptFileDao {
 
-    @Query("SELECT * FROM prompt_files ORDER BY createdAt DESC")
-    fun observeAll(): Flow<List<PromptFileEntity>>
+  @Query("SELECT * FROM prompt_files ORDER BY createdAt DESC")
+  fun observeAll(): Flow<List<PromptFileEntity>>
 
-    @Query("SELECT * FROM prompt_files WHERE id = :id LIMIT 1")
-    suspend fun getById(id: Long): PromptFileEntity?
+  @Query("SELECT * FROM prompt_files WHERE id = :id LIMIT 1")
+  suspend fun getById(id: Long): PromptFileEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(entity: PromptFileEntity): Long
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun insert(entity: PromptFileEntity): Long
 
-    @Delete
-    suspend fun delete(entity: PromptFileEntity)
+  @Delete
+  suspend fun delete(entity: PromptFileEntity)
 
-    @Query("DELETE FROM prompt_files WHERE id = :id")
-    suspend fun deleteById(id: Long)
+  @Query("DELETE FROM prompt_files WHERE id = :id")
+  suspend fun deleteById(id: Long)
 }

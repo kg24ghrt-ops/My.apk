@@ -52,8 +52,9 @@ class PromptRepository(private val context: Context) {
               val entryName = entry.name.substringAfterLast('/')
               if (looksLikeTextOrCode(entryName)) {
                 val header = "\n\n--- FILE: $entryName ---\n\n"
-                mergedOut.write(header.toByteArray(Charsets.UTF_8))
-                mergedBytes += header.toByteArray(Charsets.UTF_8).size
+                val headerBytes = header.toByteArray(Charsets.UTF_8)
+                mergedOut.write(headerBytes)
+                mergedBytes += headerBytes.size
 
                 var read: Int
                 while (zip.read(buffer).also { read = it } > 0) {
@@ -65,7 +66,7 @@ class PromptRepository(private val context: Context) {
                 mergedAnything = true
               } else {
                 val skipBuffer = ByteArray(8 * 1024)
-                while (zip.read(skipBuffer).also { read = it } > 0) {}
+                while (zip.read(skipBuffer).also { read = it } > 0) { /* drain */ }
               }
             }
             zip.closeEntry()
@@ -113,7 +114,6 @@ class PromptRepository(private val context: Context) {
     return withContext(Dispatchers.IO) {
       val file = File(entity.filePath)
       if (!file.exists() || file.length() == 0L) return@withContext Pair("", -1L)
-
       val raf = java.io.RandomAccessFile(file, "r")
       try {
         if (offsetBytes >= raf.length()) return@withContext Pair("", -1L)
