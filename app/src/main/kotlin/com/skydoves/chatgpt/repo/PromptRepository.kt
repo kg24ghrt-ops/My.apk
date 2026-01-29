@@ -23,59 +23,77 @@ class PromptRepository(private val context: Context) {
   fun allFilesFlow() = dao.observeAll()
   suspend fun getById(id: Long) = dao.getById(id)
 
+  /**
+   * Import a Uri into internal storage.
+   * If ZIP/JAR: merge all text/code entries into a single merged text file.
+   * Returns inserted entity id.
+   */
   suspend fun importUriAsFile(uri: Uri, displayName: String?): Long = withContext(Dispatchers.IO) {
     val nameHint = displayName ?: queryFileName(uri) ?: "file_${System.currentTimeMillis()}"
     val safeName = nameHint.replace(Regex("[^a-zA-Z0-9._-]"), "_")
 
+    // copy original to app files dir
     val originalFile = File(appContext.filesDir, "imported_$safeName")
     appContext.contentResolver.openInputStream(uri)?.use { input ->
       originalFile.outputStream().use { out -> input.copyTo(out) }
     } ?: throw IllegalArgumentException("Cannot open URI: $uri")
 
+    // If zip-like file, attempt to merge
     if (safeName.endsWith(".zip", true) || safeName.endsWith(".jar", true)) {
       val mergedFile = File(appContext.filesDir, "imported_${safeName}_merged.txt")
       if (mergedFile.exists()) mergedFile.delete()
 
       var mergedAnything = false
-      val MAX_MERGED_BYTES = 400L * 1024L * 1024L
-      var mergedBytes: Long = 0
+      val MAX_MERGED_BYTES = 400L * 1024L * 1024L // 400 MB limit
+      var mergedBytes: Long = 0L
+      val MAX_ENTRIES = 5000
 
       openZipStream(originalFile).use { zip ->
-        var entry: ZipEntry? = zip.nextEntry
-        val MAX_ENTRIES = 5000
         var entriesProcessed = 0
 
         FileOutputStream(mergedFile, false).use { mergedOut ->
           val buffer = ByteArray(8 * 1024)
-          while (entry != null && entriesProcessed < MAX_ENTRIES) {
+
+          while (true) {
+            val entry: ZipEntry = zip.nextEntry ?: break
+            if (entriesProcessed >= MAX_ENTRIES) {
+              zip.closeEntry()
+              break
+            }
+
             if (!entry.isDirectory) {
               val entryName = entry.name.substringAfterLast('/')
               if (looksLikeTextOrCode(entryName)) {
+                // write header
                 val header = "\n\n--- FILE: $entryName ---\n\n"
                 val headerBytes = header.toByteArray(Charsets.UTF_8)
                 mergedOut.write(headerBytes)
                 mergedBytes += headerBytes.size
 
-                var read: Int
-                while (zip.read(buffer).also { read = it } > 0) {
-                  mergedOut.write(buffer, 0, read)
-                  mergedBytes += read
+                // stream entry content
+                var bytesRead = zip.read(buffer)
+                while (bytesRead > 0) {
+                  mergedOut.write(buffer, 0, bytesRead)
+                  mergedBytes += bytesRead
                   if (mergedBytes > MAX_MERGED_BYTES) break
+                  bytesRead = zip.read(buffer)
                 }
                 mergedOut.flush()
                 mergedAnything = true
               } else {
-                val skipBuffer = ByteArray(8 * 1024)
-                while (zip.read(skipBuffer).also { read = it } > 0) { /* drain */ }
+                // drain entry (skip binary)
+                var dr = zip.read(buffer)
+                while (dr > 0) {
+                  dr = zip.read(buffer)
+                }
               }
             }
             zip.closeEntry()
-            entry = zip.nextEntry
             entriesProcessed++
             if (mergedBytes > MAX_MERGED_BYTES) break
-          }
-        }
-      }
+          } // end while entries
+        } // mergedOut closed
+      } // zip closed
 
       if (mergedAnything && mergedFile.exists() && mergedFile.length() > 0L) {
         val entity = PromptFileEntity(
@@ -87,6 +105,7 @@ class PromptRepository(private val context: Context) {
         return@withContext dao.insert(entity)
       }
 
+      // fallback: insert original zip as single entity
       val zipEntity = PromptFileEntity(
         displayName = originalFile.name,
         filePath = originalFile.absolutePath,
@@ -95,6 +114,7 @@ class PromptRepository(private val context: Context) {
       )
       return@withContext dao.insert(zipEntity)
     } else {
+      // non-zip: insert single entity
       val entity = PromptFileEntity(
         displayName = safeName,
         filePath = originalFile.absolutePath,
@@ -105,15 +125,22 @@ class PromptRepository(private val context: Context) {
     }
   }
 
+  /**
+   * Delete entity and backing file/directory.
+   */
   suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {
     dao.delete(entity)
     try { File(entity.filePath).deleteRecursively() } catch (_: Exception) {}
   }
 
+  /**
+   * Read a UTF-8 chunk from file; returns Pair(text, nextOffset) with -1L meaning EOF.
+   */
   suspend fun readChunk(entity: PromptFileEntity, offsetBytes: Long, chunkSizeBytes: Int): Pair<String, Long> {
     return withContext(Dispatchers.IO) {
       val file = File(entity.filePath)
       if (!file.exists() || file.length() == 0L) return@withContext Pair("", -1L)
+
       val raf = java.io.RandomAccessFile(file, "r")
       try {
         if (offsetBytes >= raf.length()) return@withContext Pair("", -1L)
@@ -132,6 +159,8 @@ class PromptRepository(private val context: Context) {
     }
   }
 
+  // ---------- helpers ----------
+
   private fun openZipStream(zipFile: File): ZipInputStream {
     val fis = zipFile.inputStream()
     val bis = BufferedInputStream(fis)
@@ -142,10 +171,12 @@ class PromptRepository(private val context: Context) {
     var name: String? = null
     val resolver = appContext.contentResolver
     val cursor: Cursor? = try { resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null) } catch (_: Exception) { null }
-    cursor?.use { if (it.moveToFirst()) {
-      val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-      if (idx >= 0) name = it.getString(idx)
-    }}
+    cursor?.use {
+      if (it.moveToFirst()) {
+        val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (idx >= 0) name = it.getString(idx)
+      }
+    }
     if (name == null) name = uri.lastPathSegment
     return name
   }
