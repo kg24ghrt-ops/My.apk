@@ -7,18 +7,13 @@ import androidx.room.RoomDatabase
 import com.skydoves.chatgpt.data.dao.PromptFileDao
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
 
-@Database(
-    entities = [PromptFileEntity::class],
-    version = 1,
-    exportSchema = false // prevents Room schema export warnings
-)
+@Database(entities = [PromptFileEntity::class], version = 1)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun promptFileDao(): PromptFileDao
 
     companion object {
-        @Volatile
-        private var INSTANCE: AppDatabase? = null
+        @Volatile private var INSTANCE: AppDatabase? = null
 
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
@@ -27,9 +22,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "prompt_app.db"
                 )
-                    .fallbackToDestructiveMigration()
-                    .build()
-                    .also { INSTANCE = it }
+                .fallbackToDestructiveMigration()
+                .build().also { INSTANCE = it }
             }
     }
 }
