@@ -89,12 +89,17 @@ secrets {
 }
 
 dependencies {
-
+  
   // core modules
+ 
   implementation(project(":core-designsystem"))
   implementation(project(":core-navigation"))
   implementation(project(":core-data"))
-
+   // Room (add inside dependencies { ... })
+  implementation("androidx.room:room-runtime:2.6.1")
+  implementation("androidx.room:room-ktx:2.6.1")
+  ksp("androidx.room:room-compiler:2.6.1")
+ 
   // browser
   implementation("androidx.browser:browser:1.5.0")
 

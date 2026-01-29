@@ -8,161 +8,147 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import com.skydoves.chatgpt.feature.chat.ChatViewModelLocal
-import com.skydoves.chatgpt.feature.prompt.PromptManager
-import com.skydoves.chatgpt.feature.prompt.PromptCard
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.skydoves.chatgpt.data.entity.PromptFileEntity
+import kotlinx.coroutines.launch
+
+private const val CHUNK_BYTES = 32 * 1024 // 32 KB chunks
 
 @Composable
-fun PromptApp() {
-  val promptManager = remember { PromptManager() }
-  val chatViewModel = remember { ChatViewModelLocal() }
+fun PromptAppScreen() {
+  val vm: PromptViewModel = viewModel()
+  val ctx = LocalContext.current
+  val files by vm.filesFlow.collectAsState()
+  val snackbarHostState = remember { SnackbarHostState() }
 
-  Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121212)) {
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-      TopBar()
-      Spacer(modifier = Modifier.height(12.dp))
-      FilePickerCard(promptManager)
-      Spacer(modifier = Modifier.height(12.dp))
-      Text("Prompt Cards", color = Color(0xFFEEEEEE), style = MaterialTheme.typography.titleMedium)
-      Spacer(modifier = Modifier.height(8.dp))
-      PromptList(promptManager, chatViewModel)
+  Column(modifier = Modifier
+    .fillMaxSize()
+    .background(Color(0xFF121212))
+    .padding(12.dp)
+  ) {
+    TopBar()
+    Spacer(modifier = Modifier.height(8.dp))
+    FileImportRow(vm)
+    Spacer(modifier = Modifier.height(12.dp))
+    Text("Imported Files", color = Color(0xFFEEEEEE), style = MaterialTheme.typography.titleMedium)
+    Spacer(modifier = Modifier.height(8.dp))
+    if (files.isEmpty()) {
+      Text("No files yet", color = Color(0xFFAAAAAA))
+    } else {
+      LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
+        items(files) { f -> FileRow(f, vm, ctx) }
+      }
     }
   }
 }
 
 @Composable
-private fun TopBar() {
-  Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-    Text("Prompt Assistant", color = Color(0xFF00BCD4), style = MaterialTheme.typography.titleLarge)
-  }
-}
-
-@Composable
-private fun FilePickerCard(promptManager: PromptManager) {
+private fun FileImportRow(vm: PromptViewModel) {
   val context = LocalContext.current
-  val clipboardManager = LocalClipboardManager.current
-  var description by remember { mutableStateOf("") }
-  var lastFileName by remember { mutableStateOf("No file selected") }
-
+  var displayName by remember { mutableStateOf("") }
   val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
     uri?.let {
-      val text = readTextFromUri(context, it)
-      lastFileName = uri.lastPathSegment ?: "file"
-      if (text.isNotEmpty()) {
-        promptManager.addCard(lastFileName, text, description)
-        description = ""
-      }
+      vm.importUri(it, displayName.ifBlank { null })
+      displayName = ""
     }
   }
 
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .background(Color(0xFF1E1E1E))
-      .padding(12.dp)
-  ) {
-    Text("Select a file to create a prompt card", color = Color(0xFFEEEEEE))
-    Spacer(modifier = Modifier.height(6.dp))
-
-    // BasicTextField for description (version-safe)
-    Box(
-      modifier = Modifier
-        .fillMaxWidth()
-        .background(Color(0xFF2A2A2A))
-        .padding(10.dp)
-    ) {
-      if (description.isEmpty()) {
-        Text(text = "Reason / description (optional)", color = Color(0xFFAAAAAA))
-      }
-      BasicTextField(
-        value = description,
-        onValueChange = { description = it },
-        singleLine = true,
-        textStyle = TextStyle(color = Color.White),
-        modifier = Modifier.fillMaxWidth()
+  Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+    OutlinedTextField(
+      value = displayName,
+      onValueChange = { displayName = it },
+      placeholder = { Text("Optional display name") },
+      modifier = Modifier.weight(1f),
+      colors = TextFieldDefaults.textFieldColors(
+        containerColor = Color(0xFF1E1E1E),
+        textColor = Color.White,
+        placeholderColor = Color(0xFF888888)
       )
-    }
+    )
 
-    Spacer(modifier = Modifier.height(8.dp))
-
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      Button(onClick = { launcher.launch("*/*") }) { Text("Pick file") }
-      Button(onClick = { promptManager.clearAll() }) { Text("Clear all") }
-      // quick debug/copy last description (optional)
-      Button(onClick = {
-        val clip = androidx.compose.ui.platform.ClipboardManager::class // no-op placeholder
-      }) { Text(" ") }
-    }
-
-    Spacer(modifier = Modifier.height(6.dp))
-    Text("Last: $lastFileName", color = Color(0xFFAAAAAA))
-  }
-}
-
-private fun readTextFromUri(context: Context, uri: Uri): String {
-  return try {
-    val input = context.contentResolver.openInputStream(uri)
-    val reader = BufferedReader(InputStreamReader(input))
-    val text = reader.readText()
-    reader.close()
-    input?.close()
-    text
-  } catch (e: Exception) {
-    ""
+    Button(onClick = { launcher.launch("*/*") }) { Text("Import") }
   }
 }
 
 @Composable
-private fun PromptList(promptManager: PromptManager, chatViewModel: ChatViewModelLocal) {
-  val cards = promptManager.cards // observable mutableStateListOf in manager
+private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context) {
+  val coroutine = rememberCoroutineScope()
+  var preview by remember { mutableStateOf("") }
+  var nextOffset by remember { mutableStateOf(0L) }
+  var loading by remember { mutableStateOf(false) }
+  var expanded by remember { mutableStateOf(false) }
 
-  LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    items(cards) { card ->
-      PromptCardRow(card = card, onCopy = { context, c -> copyToClipboard(context, c) }, onPreview = { chatViewModel.addPair(card.content) })
-    }
-  }
-}
-
-@Composable
-private fun PromptCardRow(card: PromptCard, onCopy: (Context, PromptCard) -> Unit, onPreview: () -> Unit) {
-  val context = LocalContext.current
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .background(Color(0xFF1E1E1E))
-      .padding(10.dp)
+  Column(modifier = Modifier
+    .fillMaxWidth()
+    .background(Color(0xFF1E1E1E))
+    .padding(10.dp)
   ) {
-    Text("File: ${card.fileName}", color = Color(0xFF00BCD4))
+    Text("Name: ${entity.displayName}", color = Color(0xFF00BCD4))
     Spacer(modifier = Modifier.height(6.dp))
-    Text("Desc: ${card.description}", color = Color(0xFFEEEEEE))
+    Text("Size: ${entity.fileSizeBytes} bytes", color = Color(0xFFEEEEEE))
     Spacer(modifier = Modifier.height(6.dp))
-    Text(card.content.take(200) + if (card.content.length > 200) "..." else "", color = Color(0xFFDDDDDD))
-    Spacer(modifier = Modifier.height(8.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      Button(onClick = { onCopy(context, card) }) { Text("Copy Prompt") }
-      Button(onClick = { onPreview() }) { Text("Preview in Chat") }
+      Button(onClick = {
+        // load initial preview chunk
+        if (!loading) {
+          loading = true
+          coroutine.launch {
+            val (text, nxt) = vm.readChunk(entity, 0L, CHUNK_BYTES)
+            preview = text
+            nextOffset = if (nxt < 0) -1L else nxt
+            expanded = true
+            loading = false
+          }
+        } else {
+          expanded = !expanded
+        }
+      }) { Text("View") }
+
+      Button(onClick = {
+        // copy full prompt text reference (filename + path + hint) to clipboard
+        copyPromptReferenceToClipboard(ctx, entity)
+      }) { Text("Copy prompt") }
+
+      Button(onClick = { vm.delete(entity) }) { Text("Delete") }
+    }
+
+    if (expanded) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Column(modifier = Modifier
+        .fillMaxWidth()
+        .heightIn(min = 120.dp, max = 400.dp)
+        .verticalScroll(rememberScrollState())
+      ) {
+        Text(preview, color = Color(0xFFDDDDDD))
+        if (nextOffset > 0) {
+          Spacer(modifier = Modifier.height(8.dp))
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+              // load next chunk
+              coroutine.launch {
+                val (text, nxt) = vm.readChunk(entity, nextOffset, CHUNK_BYTES)
+                preview += "\n" + text
+                nextOffset = if (nxt < 0) -1L else nxt
+              }
+            }) { Text("Load more") }
+          }
+        }
+      }
     }
   }
 }
 
-private fun copyToClipboard(context: Context, card: PromptCard) {
-  val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-  val clip = android.content.ClipData.newPlainText("PromptCard", buildPromptText(card))
+private fun copyPromptReferenceToClipboard(ctx: Context, entity: PromptFileEntity) {
+  val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+  val text = "Filename: ${entity.displayName}\nPath: ${entity.filePath}\n\n(Use this file in your prompt; open file in app to preview content.)"
+  val clip = android.content.ClipData.newPlainText("PromptRef", text)
   clipboard.setPrimaryClip(clip)
-}
-
-private fun buildPromptText(card: PromptCard): String {
-  return "Filename: ${card.fileName}\nDescription: ${card.description}\n\n${card.content}"
 }
