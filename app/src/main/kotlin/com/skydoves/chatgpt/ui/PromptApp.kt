@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
@@ -26,8 +29,7 @@ private const val CHUNK_BYTES = 32 * 1024 // 32 KB chunks
 fun PromptAppScreen() {
   val vm: PromptViewModel = viewModel()
   val ctx = LocalContext.current
-  val files by vm.filesFlow.collectAsState()
-  val snackbarHostState = remember { SnackbarHostState() }
+  val files by vm.filesFlow.collectAsState() // filesFlow is a StateFlow in ViewModel
 
   Column(modifier = Modifier
     .fillMaxSize()
@@ -51,6 +53,13 @@ fun PromptAppScreen() {
 }
 
 @Composable
+private fun TopBar() {
+  Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Text("Prompt Assistant", color = Color(0xFF00BCD4), style = MaterialTheme.typography.titleLarge)
+  }
+}
+
+@Composable
 private fun FileImportRow(vm: PromptViewModel) {
   val context = LocalContext.current
   var displayName by remember { mutableStateOf("") }
@@ -62,17 +71,23 @@ private fun FileImportRow(vm: PromptViewModel) {
   }
 
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-    OutlinedTextField(
-      value = displayName,
-      onValueChange = { displayName = it },
-      placeholder = { Text("Optional display name") },
-      modifier = Modifier.weight(1f),
-      colors = TextFieldDefaults.textFieldColors(
-        containerColor = Color(0xFF1E1E1E),
-        textColor = Color.White,
-        placeholderColor = Color(0xFF888888)
+    // BasicTextField (safer cross-version than relying on TextFieldDefaults parameter names)
+    Box(modifier = Modifier
+      .weight(1f)
+      .background(Color(0xFF1E1E1E))
+      .padding(8.dp)
+    ) {
+      if (displayName.isEmpty()) {
+        Text(text = "Optional display name", color = Color(0xFF888888))
+      }
+      BasicTextField(
+        value = displayName,
+        onValueChange = { displayName = it },
+        singleLine = true,
+        textStyle = TextStyle(color = Color.White),
+        modifier = Modifier.fillMaxWidth()
       )
-    )
+    }
 
     Button(onClick = { launcher.launch("*/*") }) { Text("Import") }
   }
@@ -113,7 +128,7 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
       }) { Text("View") }
 
       Button(onClick = {
-        // copy full prompt text reference (filename + path + hint) to clipboard
+        // copy file reference to clipboard
         copyPromptReferenceToClipboard(ctx, entity)
       }) { Text("Copy prompt") }
 

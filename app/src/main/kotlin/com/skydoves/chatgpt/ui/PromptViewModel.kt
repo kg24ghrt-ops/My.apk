@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 class PromptViewModel(application: Application) : AndroidViewModel(application) {
   private val repo = PromptRepository(application.applicationContext)
 
-  // observable list of prompt files
+  // observable list of prompt files — we make it a StateFlow for easy Compose usage
   val filesFlow = repo.allFilesFlow()
     .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -31,5 +31,6 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     viewModelScope.launch { repo.delete(entity) }
   }
 
+  // expose readChunk helper (suspend)
   suspend fun readChunk(entity: PromptFileEntity, offset: Long, chunkSize: Int) = repo.readChunk(entity, offset, chunkSize)
 }

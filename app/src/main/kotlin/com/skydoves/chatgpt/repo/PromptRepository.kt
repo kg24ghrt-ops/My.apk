@@ -10,18 +10,20 @@ import java.io.File
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
 
-class PromptRepository(context: Context) {
+class PromptRepository(private val context: Context) {
 
   private val appContext = context.applicationContext
   private val db = AppDatabase.getInstance(appContext)
   private val dao = db.promptFileDao()
 
-  fun observeAllFiles() = dao.observeAll()
+  // Keep old name so ViewModel stays compatible
+  fun allFilesFlow() = dao.getAllFlow()
 
   suspend fun getById(id: Long) = dao.getById(id)
 
   /**
    * Import a file URI into internal storage and store metadata only.
+   * Returns the inserted row id.
    */
   suspend fun importUriAsFile(
     uri: Uri,
@@ -50,38 +52,35 @@ class PromptRepository(context: Context) {
   }
 
   suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {
-    dao.deleteById(entity.id)
+    dao.delete(entity)
     runCatching { File(entity.filePath).delete() }
   }
 
   /**
-   * Reads a UTF-8 safe chunk of a file.
-   * Never loads full file into memory.
+   * Read a UTF-8 safe chunk of a file using RandomAccessFile semantics.
+   * Returns Pair(text, nextOffset) where nextOffset == -1L indicates EOF.
    */
-  suspend fun readChunk(
-    entity: PromptFileEntity,
-    offsetBytes: Long,
-    chunkSizeBytes: Int
-  ): Pair<String, Long> = withContext(Dispatchers.IO) {
+  suspend fun readChunk(entity: PromptFileEntity, offsetBytes: Long, chunkSizeBytes: Int): Pair<String, Long> {
+    return withContext(Dispatchers.IO) {
+      val file = File(entity.filePath)
+      if (!file.exists()) return@withContext Pair("", -1L)
 
-    val file = File(entity.filePath)
-    if (!file.exists()) return@withContext "" to -1L
-
-    val raf = file.inputStream()
-    try {
-      raf.skip(offsetBytes)
-
-      val reader = InputStreamReader(raf, StandardCharsets.UTF_8)
-      val buffer = CharArray(chunkSizeBytes)
-      val read = reader.read(buffer)
-
-      if (read <= 0) return@withContext "" to -1L
-
-      val nextOffset = offsetBytes + read
-      buffer.concatToString(0, read) to
-        if (nextOffset >= file.length()) -1L else nextOffset
-    } finally {
-      try { raf.close() } catch (_: Exception) {}
+      val raf = java.io.RandomAccessFile(file, "r")
+      try {
+        if (offsetBytes >= raf.length()) return@withContext Pair("", -1L)
+        raf.seek(offsetBytes)
+        val toRead = minOf(chunkSizeBytes, (raf.length() - offsetBytes).toInt())
+        val bytes = ByteArray(toRead)
+        val actuallyRead = raf.read(bytes)
+        if (actuallyRead <= 0) return@withContext Pair("", -1L)
+        // decode with UTF-8
+        val text = String(bytes, 0, actuallyRead, StandardCharsets.UTF_8)
+        val next = offsetBytes + actuallyRead
+        val nextOffset = if (next >= raf.length()) -1L else next
+        Pair(text, nextOffset)
+      } finally {
+        try { raf.close() } catch (_: Exception) {}
+      }
     }
   }
 
