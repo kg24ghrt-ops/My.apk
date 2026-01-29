@@ -16,190 +16,146 @@ import java.util.zip.ZipInputStream
 
 class PromptRepository(private val context: Context) {
 
-  private val appContext = context.applicationContext
-  private val db = AppDatabase.getInstance(appContext)
-  private val dao = db.promptFileDao()
+    private val appContext = context.applicationContext
+    private val db = AppDatabase.getInstance(appContext)
+    private val dao = db.promptFileDao()
 
-  fun allFilesFlow() = dao.observeAll()
-  suspend fun getById(id: Long) = dao.getById(id)
+    fun allFilesFlow() = dao.observeAll()
+    suspend fun getById(id: Long) = dao.getById(id)
 
-  /**
-   * Import a Uri into internal storage.
-   * If ZIP/JAR: merge all text/code entries into a single merged text file.
-   * Returns inserted entity id.
-   */
-  suspend fun importUriAsFile(uri: Uri, displayName: String?): Long = withContext(Dispatchers.IO) {
-    val nameHint = displayName ?: queryFileName(uri) ?: "file_${System.currentTimeMillis()}"
-    val safeName = nameHint.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+    // ------------------- IMPORT -------------------
+    suspend fun importUriAsFile(uri: Uri, displayName: String?): Long = withContext(Dispatchers.IO) {
+        val nameHint = displayName ?: queryFileName(uri) ?: "file_${System.currentTimeMillis()}"
+        val safeName = nameHint.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        val originalFile = File(appContext.filesDir, "imported_$safeName")
 
-    // copy original to app files dir
-    val originalFile = File(appContext.filesDir, "imported_$safeName")
-    appContext.contentResolver.openInputStream(uri)?.use { input ->
-      originalFile.outputStream().use { out -> input.copyTo(out) }
-    } ?: throw IllegalArgumentException("Cannot open URI: $uri")
+        appContext.contentResolver.openInputStream(uri)?.use { input ->
+            originalFile.outputStream().use { out -> input.copyTo(out) }
+        } ?: throw IllegalArgumentException("Cannot open URI: $uri")
 
-    // If zip-like file, attempt to merge
-    if (safeName.endsWith(".zip", true) || safeName.endsWith(".jar", true)) {
-      val mergedFile = File(appContext.filesDir, "imported_${safeName}_merged.txt")
-      if (mergedFile.exists()) mergedFile.delete()
+        if (safeName.endsWith(".zip", true) || safeName.endsWith(".jar", true)) {
+            // If ZIP/JAR, keep original as entity
+            val zipEntity = PromptFileEntity(
+                displayName = originalFile.name,
+                filePath = originalFile.absolutePath,
+                language = "zip",
+                fileSizeBytes = originalFile.length()
+            )
+            return@withContext dao.insert(zipEntity)
+        } else {
+            val entity = PromptFileEntity(
+                displayName = safeName,
+                filePath = originalFile.absolutePath,
+                language = guessLanguageFromName(safeName),
+                fileSizeBytes = originalFile.length()
+            )
+            return@withContext dao.insert(entity)
+        }
+    }
 
-      var mergedAnything = false
-      val MAX_MERGED_BYTES = 400L * 1024L * 1024L // 400 MB limit
-      var mergedBytes: Long = 0L
-      val MAX_ENTRIES = 5000
+    // ------------------- DELETE -------------------
+    suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {
+        dao.delete(entity)
+        try { File(entity.filePath).deleteRecursively() } catch (_: Exception) {}
+    }
 
-      openZipStream(originalFile).use { zip ->
-        var entriesProcessed = 0
+    // ------------------- READ CHUNK -------------------
+    suspend fun readChunk(entity: PromptFileEntity, offsetBytes: Long, chunkSizeBytes: Int): Pair<String, Long> =
+        withContext(Dispatchers.IO) {
+            val file = File(entity.filePath)
+            if (!file.exists() || file.length() == 0L) return@withContext Pair("", -1L)
 
-        FileOutputStream(mergedFile, false).use { mergedOut ->
-          val buffer = ByteArray(8 * 1024)
-
-          while (true) {
-            val entry: ZipEntry = zip.nextEntry ?: break
-            if (entriesProcessed >= MAX_ENTRIES) {
-              zip.closeEntry()
-              break
+            val raf = java.io.RandomAccessFile(file, "r")
+            try {
+                if (offsetBytes >= raf.length()) return@withContext Pair("", -1L)
+                raf.seek(offsetBytes)
+                val toRead = minOf(chunkSizeBytes, (raf.length() - offsetBytes).toInt())
+                val bytes = ByteArray(toRead)
+                val actuallyRead = raf.read(bytes)
+                if (actuallyRead <= 0) return@withContext Pair("", -1L)
+                val text = String(bytes, 0, actuallyRead, Charsets.UTF_8)
+                val nextOffset = offsetBytes + actuallyRead
+                Pair(text, if (nextOffset >= raf.length()) -1L else nextOffset)
+            } finally {
+                try { raf.close() } catch (_: Exception) {}
             }
+        }
 
-            if (!entry.isDirectory) {
-              val entryName = entry.name.substringAfterLast('/')
-              if (looksLikeTextOrCode(entryName)) {
-                // write header
-                val header = "\n\n--- FILE: $entryName ---\n\n"
-                val headerBytes = header.toByteArray(Charsets.UTF_8)
-                mergedOut.write(headerBytes)
-                mergedBytes += headerBytes.size
+    // ------------------- PROJECT TREE GENERATOR -------------------
+    /**
+     * Generate a tree view of a ZIP file with text/code files.
+     * Each file's content is included, indented by depth.
+     */
+    suspend fun generateProjectTreeFromZip(entity: PromptFileEntity): String = withContext(Dispatchers.IO) {
+        val zipFile = File(entity.filePath)
+        if (!zipFile.exists()) return@withContext "ZIP file does not exist."
 
-                // stream entry content
-                var bytesRead = zip.read(buffer)
-                while (bytesRead > 0) {
-                  mergedOut.write(buffer, 0, bytesRead)
-                  mergedBytes += bytesRead
-                  if (mergedBytes > MAX_MERGED_BYTES) break
-                  bytesRead = zip.read(buffer)
+        val treeBuilder = StringBuilder()
+        openZipStream(zipFile).use { zip ->
+            val buffer = ByteArray(8 * 1024)
+            var entry: ZipEntry? = zip.nextEntry
+            while (entry != null) {
+                if (!entry.isDirectory && looksLikeTextOrCode(entry.name)) {
+                    val depth = entry.name.count { it == '/' }
+                    treeBuilder.append("│   ".repeat(depth))
+                    val fileName = entry.name.substringAfterLast('/')
+                    treeBuilder.append("├─ $fileName\n")
+
+                    val contentBuilder = StringBuilder()
+                    var bytesRead = zip.read(buffer)
+                    while (bytesRead > 0) {
+                        contentBuilder.append(String(buffer, 0, bytesRead, Charsets.UTF_8))
+                        bytesRead = zip.read(buffer)
+                    }
+
+                    contentBuilder.lines().forEach { line ->
+                        treeBuilder.append("│   ".repeat(depth + 1))
+                        treeBuilder.append(line).append("\n")
+                    }
                 }
-                mergedOut.flush()
-                mergedAnything = true
-              } else {
-                // drain entry (skip binary)
-                var dr = zip.read(buffer)
-                while (dr > 0) {
-                  dr = zip.read(buffer)
-                }
-              }
+                zip.closeEntry()
+                entry = zip.nextEntry
             }
-            zip.closeEntry()
-            entriesProcessed++
-            if (mergedBytes > MAX_MERGED_BYTES) break
-          } // end while entries
-        } // mergedOut closed
-      } // zip closed
+        }
+        treeBuilder.toString()
+    }
 
-      if (mergedAnything && mergedFile.exists() && mergedFile.length() > 0L) {
-        val entity = PromptFileEntity(
-          displayName = displayName ?: "${safeName}_merged.txt",
-          filePath = mergedFile.absolutePath,
-          language = guessLanguageFromName(mergedFile.name),
-          fileSizeBytes = mergedFile.length()
+    // ---------- HELPERS ----------
+    private fun openZipStream(zipFile: File) = ZipInputStream(BufferedInputStream(zipFile.inputStream()))
+
+    private fun queryFileName(uri: Uri): String? {
+        var name: String? = null
+        val resolver = appContext.contentResolver
+        val cursor: Cursor? = try { resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null) } catch (_: Exception) { null }
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) name = it.getString(idx)
+            }
+        }
+        if (name == null) name = uri.lastPathSegment
+        return name
+    }
+
+    private fun looksLikeTextOrCode(name: String): Boolean {
+        val lower = name.lowercase()
+        val textExt = listOf(
+            ".kt", ".java", ".xml", ".json", ".md", ".py", ".js", ".ts",
+            ".c", ".cpp", ".h", ".txt", ".gradle", ".properties", ".yml", ".yaml", ".html", ".css", ".rb", ".go", ".rs", ".swift", ".php"
         )
-        return@withContext dao.insert(entity)
-      }
-
-      // fallback: insert original zip as single entity
-      val zipEntity = PromptFileEntity(
-        displayName = originalFile.name,
-        filePath = originalFile.absolutePath,
-        language = "zip",
-        fileSizeBytes = originalFile.length()
-      )
-      return@withContext dao.insert(zipEntity)
-    } else {
-      // non-zip: insert single entity
-      val entity = PromptFileEntity(
-        displayName = safeName,
-        filePath = originalFile.absolutePath,
-        language = guessLanguageFromName(safeName),
-        fileSizeBytes = originalFile.length()
-      )
-      return@withContext dao.insert(entity)
+        return textExt.any { lower.endsWith(it) }
     }
-  }
 
-  /**
-   * Delete entity and backing file/directory.
-   */
-  suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {
-    dao.delete(entity)
-    try { File(entity.filePath).deleteRecursively() } catch (_: Exception) {}
-  }
-
-  /**
-   * Read a UTF-8 chunk from file; returns Pair(text, nextOffset) with -1L meaning EOF.
-   */
-  suspend fun readChunk(entity: PromptFileEntity, offsetBytes: Long, chunkSizeBytes: Int): Pair<String, Long> {
-    return withContext(Dispatchers.IO) {
-      val file = File(entity.filePath)
-      if (!file.exists() || file.length() == 0L) return@withContext Pair("", -1L)
-
-      val raf = java.io.RandomAccessFile(file, "r")
-      try {
-        if (offsetBytes >= raf.length()) return@withContext Pair("", -1L)
-        raf.seek(offsetBytes)
-        val toRead = minOf(chunkSizeBytes, (raf.length() - offsetBytes).toInt())
-        val bytes = ByteArray(toRead)
-        val actuallyRead = raf.read(bytes)
-        if (actuallyRead <= 0) return@withContext Pair("", -1L)
-        val text = String(bytes, 0, actuallyRead, Charsets.UTF_8)
-        val next = offsetBytes + actuallyRead
-        val nextOffset = if (next >= raf.length()) -1L else next
-        Pair(text, nextOffset)
-      } finally {
-        try { raf.close() } catch (_: Exception) {}
-      }
+    private fun guessLanguageFromName(name: String): String? = when {
+        name.endsWith(".kt", true) -> "kotlin"
+        name.endsWith(".java", true) -> "java"
+        name.endsWith(".xml", true) -> "xml"
+        name.endsWith(".json", true) -> "json"
+        name.endsWith(".md", true) -> "markdown"
+        name.endsWith(".py", true) -> "python"
+        name.endsWith(".js", true) -> "javascript"
+        name.endsWith(".c", true) -> "c"
+        name.endsWith(".cpp", true) -> "cpp"
+        else -> null
     }
-  }
-
-  // ---------- helpers ----------
-
-  private fun openZipStream(zipFile: File): ZipInputStream {
-    val fis = zipFile.inputStream()
-    val bis = BufferedInputStream(fis)
-    return ZipInputStream(bis)
-  }
-
-  private fun queryFileName(uri: Uri): String? {
-    var name: String? = null
-    val resolver = appContext.contentResolver
-    val cursor: Cursor? = try { resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null) } catch (_: Exception) { null }
-    cursor?.use {
-      if (it.moveToFirst()) {
-        val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        if (idx >= 0) name = it.getString(idx)
-      }
-    }
-    if (name == null) name = uri.lastPathSegment
-    return name
-  }
-
-  private fun looksLikeTextOrCode(name: String): Boolean {
-    val lower = name.lowercase()
-    val textExt = listOf(
-      ".kt", ".java", ".xml", ".json", ".md", ".py", ".js", ".ts",
-      ".c", ".cpp", ".h", ".txt", ".gradle", ".properties", ".yml", ".yaml", ".html", ".css", ".rb", ".go", ".rs", ".swift", ".php"
-    )
-    return textExt.any { lower.endsWith(it) }
-  }
-
-  private fun guessLanguageFromName(name: String): String? = when {
-    name.endsWith(".kt", true) -> "kotlin"
-    name.endsWith(".java", true) -> "java"
-    name.endsWith(".xml", true) -> "xml"
-    name.endsWith(".json", true) -> "json"
-    name.endsWith(".md", true) -> "markdown"
-    name.endsWith(".py", true) -> "python"
-    name.endsWith(".js", true) -> "javascript"
-    name.endsWith(".c", true) -> "c"
-    name.endsWith(".cpp", true) -> "cpp"
-    else -> null
-  }
 }

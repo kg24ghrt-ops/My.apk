@@ -28,4 +28,8 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
 
     suspend fun readChunk(entity: PromptFileEntity, offset: Long, chunkSize: Int) =
         repo.readChunk(entity, offset, chunkSize)
+
+    // ------------------- NEW: Project tree from ZIP -------------------
+    suspend fun generateProjectTree(entity: PromptFileEntity): String =
+        repo.generateProjectTreeFromZip(entity)
 }

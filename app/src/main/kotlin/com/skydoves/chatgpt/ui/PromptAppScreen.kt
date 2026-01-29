@@ -32,160 +32,195 @@ private const val CHUNK_BYTES = 32 * 1024 // 32 KB chunks
 
 @Composable
 fun PromptAppScreen() {
-  val vm: PromptViewModel = viewModel()
-  val ctx = LocalContext.current
-  val files by vm.filesFlow.collectAsStateWithLifecycle(emptyList())
+    val vm: PromptViewModel = viewModel()
+    val ctx = LocalContext.current
+    val files by vm.filesFlow.collectAsStateWithLifecycle(emptyList())
 
-  Column(
-    modifier = Modifier
-      .fillMaxSize()
-      .background(Color(0xFF121212))
-      .padding(12.dp)
-  ) {
-    TopBar()
-    Spacer(modifier = Modifier.height(8.dp))
-    FileImportRow(vm)
-    Spacer(modifier = Modifier.height(12.dp))
-    Text(
-      "Imported Files",
-      color = Color(0xFFEEEEEE),
-      style = MaterialTheme.typography.titleMedium
-    )
-    Spacer(modifier = Modifier.height(8.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212))
+            .padding(12.dp)
+    ) {
+        TopBar()
+        Spacer(modifier = Modifier.height(8.dp))
+        FileImportRow(vm)
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            "Imported Files",
+            color = Color(0xFFEEEEEE),
+            style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
 
-    if (files.isEmpty()) {
-      Text("No files yet", color = Color(0xFFAAAAAA))
-    } else {
-      LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxSize()
-      ) {
-        items(files) { f -> FileRow(f, vm, ctx) }
-      }
+        if (files.isEmpty()) {
+            Text("No files yet", color = Color(0xFFAAAAAA))
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(files) { f -> FileRow(f, vm, ctx) }
+            }
+        }
     }
-  }
 }
 
 @Composable
 private fun TopBar() {
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    Text(
-      "Prompt Assistant",
-      color = Color(0xFF00BCD4),
-      style = MaterialTheme.typography.titleLarge
-    )
-  }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "Prompt Assistant",
+            color = Color(0xFF00BCD4),
+            style = MaterialTheme.typography.titleLarge
+        )
+    }
 }
 
 @Composable
 private fun FileImportRow(vm: PromptViewModel) {
-  var displayName by remember { mutableStateOf("") }
-  val context = LocalContext.current
-  val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-    uri?.let {
-      vm.importUri(it, displayName.ifBlank { null })
-      displayName = ""
+    var displayName by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let {
+            vm.importUri(it, displayName.ifBlank { null })
+            displayName = ""
+        }
     }
-  }
 
-  Row(
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-    modifier = Modifier.fillMaxWidth()
-  ) {
-    Box(
-      modifier = Modifier
-        .weight(1f)
-        .background(Color(0xFF1E1E1E))
-        .padding(8.dp)
-    ) {
-      if (displayName.isEmpty()) {
-        Text(text = "Optional display name", color = Color(0xFF888888))
-      }
-      BasicTextField(
-        value = displayName,
-        onValueChange = { displayName = it },
-        singleLine = true,
-        textStyle = TextStyle(color = Color.White),
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth()
-      )
-    }
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .background(Color(0xFF1E1E1E))
+                .padding(8.dp)
+        ) {
+            if (displayName.isEmpty()) {
+                Text(text = "Optional display name", color = Color(0xFF888888))
+            }
+            BasicTextField(
+                value = displayName,
+                onValueChange = { displayName = it },
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
-    Button(onClick = { launcher.launch("*/*") }) { Text("Import") }
-  }
+        Button(onClick = { launcher.launch("*/*") }) { Text("Import") }
+    }
 }
 
 @Composable
 private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context) {
-  val coroutine = rememberCoroutineScope()
-  var preview by remember { mutableStateOf("") }
-  var nextOffset by remember { mutableStateOf(0L) }
-  var loading by remember { mutableStateOf(false) }
-  var expanded by remember { mutableStateOf(false) }
+    val coroutine = rememberCoroutineScope()
+    var preview by remember { mutableStateOf("") }
+    var nextOffset by remember { mutableStateOf(0L) }
+    var loading by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
+    var treeLoading by remember { mutableStateOf(false) }
+    var projectTree by remember { mutableStateOf("") }
+    var showTree by remember { mutableStateOf(false) }
 
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .background(Color(0xFF1E1E1E))
-      .padding(10.dp)
-  ) {
-    Text("Name: ${entity.displayName}", color = Color(0xFF00BCD4))
-    Spacer(modifier = Modifier.height(6.dp))
-    Text("Size: ${entity.fileSizeBytes} bytes", color = Color(0xFFEEEEEE))
-    Spacer(modifier = Modifier.height(6.dp))
-
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      Button(onClick = {
-        if (!loading) {
-          loading = true
-          coroutine.launch {
-            val (text, nxt) = vm.readChunk(entity, 0L, CHUNK_BYTES)
-            preview = text
-            nextOffset = if (nxt < 0) -1L else nxt
-            expanded = true
-            loading = false
-          }
-        } else {
-          expanded = !expanded
-        }
-      }) { Text("View") }
-
-      Button(onClick = { copyPromptReferenceToClipboard(ctx, entity) }) { Text("Copy prompt") }
-
-      Button(onClick = { vm.delete(entity) }) { Text("Delete") }
-    }
-
-    if (expanded) {
-      Spacer(modifier = Modifier.height(8.dp))
-      Column(
+    Column(
         modifier = Modifier
-          .fillMaxWidth()
-          .heightIn(min = 120.dp, max = 400.dp)
-          .verticalScroll(rememberScrollState())
-      ) {
-        Text(preview, color = Color(0xFFDDDDDD))
-        if (nextOffset > 0) {
-          Spacer(modifier = Modifier.height(8.dp))
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            .fillMaxWidth()
+            .background(Color(0xFF1E1E1E))
+            .padding(10.dp)
+    ) {
+        Text("Name: ${entity.displayName}", color = Color(0xFF00BCD4))
+        Spacer(modifier = Modifier.height(6.dp))
+        Text("Size: ${entity.fileSizeBytes} bytes", color = Color(0xFFEEEEEE))
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
-              coroutine.launch {
-                val (text, nxt) = vm.readChunk(entity, nextOffset, CHUNK_BYTES)
-                preview += "\n" + text
-                nextOffset = if (nxt < 0) -1L else nxt
-              }
-            }) { Text("Load more") }
-          }
+                if (!loading) {
+                    loading = true
+                    coroutine.launch {
+                        val (text, nxt) = vm.readChunk(entity, 0L, CHUNK_BYTES)
+                        preview = text
+                        nextOffset = if (nxt < 0) -1L else nxt
+                        expanded = true
+                        loading = false
+                    }
+                } else {
+                    expanded = !expanded
+                }
+            }) { Text("View") }
+
+            Button(onClick = {
+                coroutine.launch {
+                    treeLoading = true
+                    projectTree = try {
+                        vm.generateProjectTree(entity)
+                    } catch (_: Exception) { "Failed to generate tree" }
+                    treeLoading = false
+                    showTree = true
+                }
+            }) { Text(if (treeLoading) "Generating..." else "Project Tree") }
+
+            Button(onClick = { copyPromptReferenceToClipboard(ctx, entity) }) { Text("Copy prompt") }
+
+            Button(onClick = { vm.delete(entity) }) { Text("Delete") }
         }
-      }
+
+        if (expanded) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp, max = 400.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(preview, color = Color(0xFFDDDDDD))
+                if (nextOffset > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            coroutine.launch {
+                                val (text, nxt) = vm.readChunk(entity, nextOffset, CHUNK_BYTES)
+                                preview += "\n" + text
+                                nextOffset = if (nxt < 0) -1L else nxt
+                            }
+                        }) { Text("Load more") }
+                    }
+                }
+            }
+        }
+
+        if (showTree && projectTree.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp, max = 400.dp)
+                    .verticalScroll(rememberScrollState())
+                    .background(Color(0xFF2E2E2E))
+                    .padding(8.dp)
+            ) {
+                Text(projectTree, color = Color(0xFFAAFFAA))
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(onClick = {
+                    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("ProjectTree", projectTree)
+                    clipboard.setPrimaryClip(clip)
+                }) { Text("Copy Tree") }
+            }
+        }
     }
-  }
 }
 
 private fun copyPromptReferenceToClipboard(ctx: Context, entity: PromptFileEntity) {
-  val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-  val text = "Filename: ${entity.displayName}\nPath: ${entity.filePath}\n\n(Use this file in your prompt; open file in app to preview content.)"
-  val clip = android.content.ClipData.newPlainText("PromptRef", text)
-  clipboard.setPrimaryClip(clip)
+    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    val text =
+        "Filename: ${entity.displayName}\nPath: ${entity.filePath}\n\n(Use this file in your prompt; open file in app to preview content.)"
+    val clip = android.content.ClipData.newPlainText("PromptRef", text)
+    clipboard.setPrimaryClip(clip)
 }
