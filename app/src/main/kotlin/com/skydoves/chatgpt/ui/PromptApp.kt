@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.lazy.items
 
 private const val CHUNK_BYTES = 32 * 1024 // 32 KB chunks
 
