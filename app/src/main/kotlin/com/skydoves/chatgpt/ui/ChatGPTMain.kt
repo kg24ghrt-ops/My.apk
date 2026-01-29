@@ -3,9 +3,9 @@ package com.skydoves.chatgpt.ui
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,28 +23,25 @@ fun ChatGPTMain(context: Context) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF121212)) // dark background
+            .background(Color(0xFF121212))
             .padding(16.dp)
     ) {
-        // Chat History
+        // Chat history
         LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            reverseLayout = true,
-            verticalArrangement = Arrangement.Top
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            reverseLayout = true
         ) {
             items(chatViewModel.chatHistory.reversed()) { (prompt, response) ->
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     Text(
                         text = "You: $prompt",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFFEEEEEE) // user text color
+                        color = Color(0xFFEEEEEE)
                     )
                     Text(
                         text = "AI: $response",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFF00BCD4) // AI text color
+                        color = Color(0xFF00BCD4)
                     )
                 }
             }
@@ -52,13 +49,13 @@ fun ChatGPTMain(context: Context) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Input Row with BasicTextField (version-safe)
+        // Input row and actions
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Container for input so we can style background
+            // Input box (BasicTextField version for compatibility)
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -72,29 +69,40 @@ fun ChatGPTMain(context: Context) {
                     onValueChange = { inputText = it },
                     singleLine = true,
                     textStyle = textStyle,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                ) { innerTextField ->
-                    // Placeholder handling
+                    modifier = Modifier.fillMaxWidth()
+                ) { inner ->
                     if (inputText.isEmpty()) {
-                        Text(
-                            text = "Enter your prompt",
-                            color = Color(0xFFAAAAAA),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        Text("Enter your prompt", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyMedium)
                     }
-                    innerTextField()
+                    inner()
                 }
             }
 
+            // Send: copies prompt to clipboard and opens the AI page for user to paste/send
             Button(onClick = {
                 if (inputText.isNotBlank()) {
-                    chatViewModel.sendPrompt(inputText)
+                    chatViewModel.sendPromptViaBrowser(inputText)
                     inputText = ""
                 }
             }) {
                 Text("Send")
             }
+
+            // Import: read clipboard and treat as AI response (user must copy from browser first)
+            Button(onClick = {
+                chatViewModel.importResponseFromClipboard()
+            }) {
+                Text("Import")
+            }
         }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Workflow: Send → paste+send in browser → copy response → Import",
+            color = Color(0xFF888888),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp)
+        )
     }
 }
