@@ -1,4 +1,4 @@
-@file:OptIn(androidx.lifecycle.compose.ExperimentalLifecycleComposeApi::class)
+//@file:OptIn(androidx.lifecycle.compose.ExperimentalLifecycleComposeApi::class)
 
 package com.skydoves.chatgpt.ui
 
