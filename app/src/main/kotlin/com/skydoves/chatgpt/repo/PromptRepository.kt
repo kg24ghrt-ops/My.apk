@@ -33,6 +33,7 @@ class PromptRepository(private val context: Context) {
       originalFile.outputStream().use { out -> input.copyTo(out) }
     } ?: throw IllegalArgumentException("Cannot open URI: $uri")
 
+    // For zip/jar we keep the original as an entity and allow separate project-tree generation.
     if (safeName.endsWith(".zip", true) || safeName.endsWith(".jar", true)) {
       val zipEntity = PromptFileEntity(
         displayName = originalFile.name,
@@ -73,8 +74,9 @@ class PromptRepository(private val context: Context) {
         val actuallyRead = raf.read(bytes)
         if (actuallyRead <= 0) return@withContext Pair("", -1L)
         val text = String(bytes, 0, actuallyRead, Charsets.UTF_8)
-        val nextOffset = offsetBytes + actuallyRead
-        Pair(text, if (nextOffset >= raf.length()) -1L else nextOffset)
+        val next = offsetBytes + actuallyRead
+        val nextOffset = if (next >= raf.length()) -1L else next
+        Pair(text, nextOffset)
       } finally {
         try { raf.close() } catch (_: Exception) {}
       }
@@ -83,110 +85,95 @@ class PromptRepository(private val context: Context) {
   // ------------------- PROJECT TREE GENERATOR -------------------
   /**
    * Generate a tree view of a ZIP file with text/code files.
-   * This implementation streams entries, enforces limits (max entries, max output bytes)
-   * and ensures we never load huge strings into memory unbounded.
+   * Safety: limit per-file included bytes and total bytes to avoid OOM / long processing.
    *
-   * Returns a textual tree. If truncated due to safety caps, a notice will be appended.
+   * Returns a large string containing tree structure and truncated file contents.
    */
   suspend fun generateProjectTreeFromZip(entity: PromptFileEntity): String = withContext(Dispatchers.IO) {
     val zipFile = File(entity.filePath)
     if (!zipFile.exists()) return@withContext "ZIP file does not exist."
 
-    // Safety caps (tweak if needed)
-    val MAX_ENTRIES = 10_000             // max number of entries to scan
-    val MAX_OUTPUT_BYTES = 200 * 1024    // 200 KB of output text (approx)
-    val MAX_FILE_ENTRY_SIZE = 8 * 1024 * 1024 // skip entry if single file > 8MB (avoid huge single files)
+    // Safety caps
+    val MAX_TOTAL_BYTES: Long = 10L * 1024L * 1024L // at most include 10 MB total across files
+    val MAX_FILE_BYTES: Int = 128 * 1024 // at most include 128 KB per file
+    val MAX_ENTRIES = 5000
 
-    val out = StringBuilder()
-    var outBytes = 0L
+    val treeBuilder = StringBuilder()
+    var totalIncludedBytes: Long = 0L
     var entriesProcessed = 0
 
-    openZipStream(zipFile).use { zip ->
-      val buffer = ByteArray(8 * 1024)
-      var entry: ZipEntry? = zip.nextEntry
-      while (entry != null && entriesProcessed < MAX_ENTRIES && outBytes < MAX_OUTPUT_BYTES) {
-        try {
-          if (!entry.isDirectory && looksLikeTextOrCode(entry.name)) {
-            val depth = entry.name.count { it == '/' }
-            val fileName = entry.name.substringAfterLast('/')
+    try {
+      openZipStream(zipFile).use { zip ->
+        val buffer = ByteArray(8 * 1024)
+        var entry: ZipEntry? = zip.nextEntry
 
-            // header
-            val header = "│   ".repeat(depth) + "├─ $fileName\n"
-            val headerBytes = header.toByteArray(Charsets.UTF_8)
-            if (outBytes + headerBytes.size > MAX_OUTPUT_BYTES) {
-              out.append(header.take((MAX_OUTPUT_BYTES - outBytes).toInt()))
-              outBytes = MAX_OUTPUT_BYTES
-              break
-            }
-            out.append(header)
-            outBytes += headerBytes.size
+        while (entry != null && entriesProcessed < MAX_ENTRIES && totalIncludedBytes < MAX_TOTAL_BYTES) {
+          try {
+            if (!entry.isDirectory && looksLikeTextOrCode(entry.name)) {
+              val depth = entry.name.count { it == '/' }
+              treeBuilder.append("│   ".repeat(depth.coerceAtLeast(0)))
+              val fileName = entry.name.substringAfterLast('/')
+              treeBuilder.append("├─ $fileName\n")
 
-            // guard: if entry size known and huge, skip content
-            val entrySize = entry.size
-            if (entrySize != -1L && entrySize > MAX_FILE_ENTRY_SIZE) {
-              val skipNote = "│   ".repeat(depth + 1) + "[skipped large file: ${entrySize} bytes]\n"
-              val nb = skipNote.toByteArray(Charsets.UTF_8)
-              if (outBytes + nb.size > MAX_OUTPUT_BYTES) {
-                out.append(skipNote.take((MAX_OUTPUT_BYTES - outBytes).toInt()))
-                outBytes = MAX_OUTPUT_BYTES
-                break
-              }
-              out.append(skipNote)
-              outBytes += nb.size
-            } else {
-              // stream entry content but cap bytes appended
+              // Read up to MAX_FILE_BYTES from the entry
+              val fileBuffer = StringBuilder()
+              var bytesReadForThisFile = 0
               var bytesRead = zip.read(buffer)
-              val lineBuilder = StringBuilder()
-              while (bytesRead > 0 && outBytes < MAX_OUTPUT_BYTES) {
-                val chunk = String(buffer, 0, bytesRead, Charsets.UTF_8)
-                lineBuilder.append(chunk)
+              while (bytesRead > 0 && bytesReadForThisFile < MAX_FILE_BYTES && totalIncludedBytes < MAX_TOTAL_BYTES) {
+                val toAppend = if (bytesReadForThisFile + bytesRead > MAX_FILE_BYTES) {
+                  // partial read: append only remaining allowed bytes
+                  val allowed = MAX_FILE_BYTES - bytesReadForThisFile
+                  String(buffer, 0, allowed, Charsets.UTF_8)
+                } else {
+                  String(buffer, 0, bytesRead, Charsets.UTF_8)
+                }
+
+                fileBuffer.append(toAppend)
+                val actuallyCounted = minOf(bytesRead, MAX_FILE_BYTES - bytesReadForThisFile)
+                bytesReadForThisFile += actuallyCounted
+                totalIncludedBytes += actuallyCounted.toLong()
+
+                if (bytesReadForThisFile >= MAX_FILE_BYTES || totalIncludedBytes >= MAX_TOTAL_BYTES) {
+                  // stop reading more for safety
+                  break
+                }
                 bytesRead = zip.read(buffer)
               }
-              // append content lines with indent
-              val content = lineBuilder.toString()
-              val lines = content.lines()
-              for (line in lines) {
-                val prefixed = "│   ".repeat(depth + 1) + line + "\n"
-                val pb = prefixed.toByteArray(Charsets.UTF_8)
-                if (outBytes + pb.size > MAX_OUTPUT_BYTES) {
-                  val remaining = (MAX_OUTPUT_BYTES - outBytes).toInt()
-                  out.append(prefixed.take(remaining))
-                  outBytes = MAX_OUTPUT_BYTES
-                  break
-                } else {
-                  out.append(prefixed)
-                  outBytes += pb.size
-                }
+
+              // append file content indented
+              fileBuffer.lines().forEach { line ->
+                treeBuilder.append("│   ".repeat(depth + 1))
+                treeBuilder.append(line).append("\n")
               }
+
+              if (bytesReadForThisFile >= MAX_FILE_BYTES) {
+                treeBuilder.append("│   ".repeat(depth + 1)).append("[...content truncated: per-file limit reached]\n")
+              }
+              if (totalIncludedBytes >= MAX_TOTAL_BYTES) {
+                treeBuilder.append("\n[...total inclusion cap reached, further files omitted]\n")
+              }
+            } else {
+              // entry is binary or directory: drain it safely
+              val drainBuf = ByteArray(8 * 1024)
+              while (zip.read(drainBuf) > 0) { /* drain */ }
             }
+          } finally {
+            try { zip.closeEntry() } catch (_: Exception) {}
           }
-        } catch (e: Exception) {
-          // If a single entry fails to read, append a short marker and continue
-          val note = "│   [error reading entry ${entry?.name}]\n"
-          if (outBytes + note.length <= MAX_OUTPUT_BYTES) {
-            out.append(note)
-            outBytes += note.toByteArray(Charsets.UTF_8).size
-          } else {
-            outBytes = MAX_OUTPUT_BYTES
-            break
-          }
-        } finally {
-          try { zip.closeEntry() } catch (_: Exception) {}
-        }
-        entriesProcessed++
-        entry = zip.nextEntry
-      } // end while entries
 
-      if (entriesProcessed >= MAX_ENTRIES) {
-        val note = "\n[truncated: reached max entries limit $MAX_ENTRIES]\n"
-        if (outBytes < MAX_OUTPUT_BYTES) out.append(note)
-      }
-      if (outBytes >= MAX_OUTPUT_BYTES) {
-        out.append("\n[truncated: output reached ${MAX_OUTPUT_BYTES} bytes]\n")
-      }
-    } // zip closed
+          entriesProcessed++
+          entry = zip.nextEntry
+        } // end while entries
+      } // zip closed
+    } catch (e: Exception) {
+      // propagate a helpful message (your ViewModel will capture/report)
+      return@withContext "Failed to read ZIP: ${e.message ?: e.javaClass.simpleName}"
+    }
 
-    out.toString()
+    if (treeBuilder.isEmpty()) {
+      return@withContext "No text/code files found in ZIP."
+    }
+    treeBuilder.toString()
   }
 
   // ---------- HELPERS ----------
