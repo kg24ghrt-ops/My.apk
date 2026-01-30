@@ -23,219 +23,167 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 private const val CHUNK_BYTES = 32 * 1024
-private const val MAX_PREVIEW_CHARS = 5000 // truncate preview for huge files
+private const val MAX_DISPLAY_TREE_CHARS = 120_000 // cap characters shown in UI
 
 @Composable
 fun PromptAppScreen() {
-    val vm: PromptViewModel = viewModel()
-    val ctx = LocalContext.current
-    val files by vm.filesFlow.collectAsState(initial = emptyList())
-    val errorMessage by vm.errorFlow.collectAsState(initial = null)
+  val vm: PromptViewModel = viewModel()
+  val ctx = LocalContext.current
+  val files by vm.filesFlow.collectAsState(initial = emptyList())
+  val errorMessage by vm.errorFlow.collectAsState(initial = null)
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF121212))
-            .padding(12.dp)
-    ) {
-        errorMessage?.let {
-            ErrorPanelMessage(it) { vm.clearError() }
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        TopBar()
-        Spacer(modifier = Modifier.height(8.dp))
-        FileImportRow(vm)
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Text(
-            "Imported Files",
-            color = Color(0xFFEEEEEE),
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (files.isEmpty()) {
-            Text("No files yet", color = Color(0xFFAAAAAA))
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(files) { f ->
-                    FileRow(f, vm, ctx)
-                }
-            }
-        }
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Color(0xFF121212))
+      .padding(12.dp)
+  ) {
+    // error message panel (no crash)
+    errorMessage?.let {
+      ErrorPanelMessage(it) { vm.clearError() }
+      Spacer(modifier = Modifier.height(8.dp))
     }
+
+    TopBar()
+    Spacer(modifier = Modifier.height(8.dp))
+    FileImportRow(vm)
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Text(
+      "Imported Files",
+      color = Color(0xFFEEEEEE),
+      style = MaterialTheme.typography.titleMedium
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    if (files.isEmpty()) {
+      Text("No files yet", color = Color(0xFFAAAAAA))
+    } else {
+      LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxSize()
+      ) {
+        items(files) { f ->
+          FileRow(f, vm, ctx)
+        }
+      }
+    }
+  }
 }
 
 @Composable
 private fun ErrorPanelMessage(errorText: String, onDismiss: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFFB00020))
-            .padding(10.dp)
-    ) {
-        val firstLine = errorText.lineSequence().firstOrNull() ?: "Error"
-        Text(
-            firstLine,
-            color = Color.White,
-            style = MaterialTheme.typography.titleMedium
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(errorText, color = Color.White, style = MaterialTheme.typography.bodySmall)
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = onDismiss) {
-            Text("Dismiss")
-        }
-    }
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .background(Color(0xFFB00020))
+      .padding(10.dp)
+  ) {
+    val firstLine = errorText.lineSequence().firstOrNull() ?: "Error"
+    Text(firstLine, color = Color.White, style = MaterialTheme.typography.titleMedium)
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(errorText, color = Color.White, style = MaterialTheme.typography.bodySmall)
+    Spacer(modifier = Modifier.height(8.dp))
+    Button(onClick = onDismiss) { Text("Dismiss") }
+  }
 }
 
 @Composable
 private fun TopBar() {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            "Prompt Assistant",
-            color = Color(0xFF00BCD4),
-            style = MaterialTheme.typography.titleLarge
-        )
-    }
+  Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Text("Prompt Assistant", color = Color(0xFF00BCD4), style = MaterialTheme.typography.titleLarge)
+  }
 }
 
 @Composable
 private fun FileImportRow(vm: PromptViewModel) {
-    var displayName by remember { mutableStateOf("") }
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let {
-            vm.importUri(it, displayName.ifBlank { null })
-            displayName = ""
-        }
+  var displayName by remember { mutableStateOf("") }
+  val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    uri?.let {
+      vm.importUri(it, displayName.ifBlank { null })
+      displayName = ""
     }
+  }
 
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .background(Color(0xFF1E1E1E))
-                .padding(8.dp)
-        ) {
-            if (displayName.isEmpty()) {
-                Text("Optional display name", color = Color(0xFF888888))
-            }
-            BasicTextField(
-                value = displayName,
-                onValueChange = { displayName = it },
-                singleLine = true,
-                textStyle = TextStyle(color = Color.White),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        Button(onClick = { launcher.launch("*/*") }) {
-            Text("Import")
-        }
+  Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = Modifier.weight(1f).background(Color(0xFF1E1E1E)).padding(8.dp)) {
+      if (displayName.isEmpty()) Text("Optional display name", color = Color(0xFF888888))
+      BasicTextField(value = displayName, onValueChange = { displayName = it }, singleLine = true,
+        textStyle = TextStyle(color = Color.White), modifier = Modifier.fillMaxWidth())
     }
+    Button(onClick = { launcher.launch("*/*") }) { Text("Import") }
+  }
 }
 
 @Composable
 private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context) {
-    val coroutine = rememberCoroutineScope()
-    var preview by remember { mutableStateOf("") }
-    var nextOffset by remember { mutableStateOf(0L) }
-    var expanded by remember { mutableStateOf(false) }
-    var projectTree by remember { mutableStateOf("") }
-    var showTree by remember { mutableStateOf(false) }
-    var loadingTree by remember { mutableStateOf(false) }
+  val coroutine = rememberCoroutineScope()
+  var preview by remember { mutableStateOf("") }
+  var nextOffset by remember { mutableStateOf(0L) }
+  var expanded by remember { mutableStateOf(false) }
+  var projectTree by remember { mutableStateOf("") }
+  var showTree by remember { mutableStateOf(false) }
+  var treeLoading by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF1E1E1E))
-            .padding(10.dp)
-    ) {
-        Text("Name: ${entity.displayName}", color = Color(0xFF00BCD4))
-        Text("Size: ${entity.fileSizeBytes} bytes", color = Color(0xFFEEEEEE))
-        Spacer(modifier = Modifier.height(6.dp))
+  Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(10.dp)) {
+    Text("Name: ${entity.displayName}", color = Color(0xFF00BCD4))
+    Text("Size: ${entity.fileSizeBytes} bytes", color = Color(0xFFEEEEEE))
+    Spacer(modifier = Modifier.height(6.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {
-                coroutine.launch {
-                    val (text, nxt) = vm.readChunk(entity, 0L, CHUNK_BYTES)
-                    preview = text.take(MAX_PREVIEW_CHARS)
-                    nextOffset = nxt
-                    expanded = true
-                }
-            }) { Text("View") }
-
-            Button(onClick = {
-                coroutine.launch {
-                    loadingTree = true
-                    try {
-                        projectTree = withContext(Dispatchers.IO) {
-                            vm.generateProjectTree(entity)
-                        }.take(10000) // truncate large tree safely
-                        showTree = true
-                    } catch (e: Exception) {
-                        vm.reportError("Generate project tree failed: ${e.message}")
-                    } finally {
-                        loadingTree = false
-                    }
-                }
-            }) { Text(if (loadingTree) "Generating..." else "Project Tree") }
-
-            Button(onClick = { vm.delete(entity) }) { Text("Delete") }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      Button(onClick = {
+        coroutine.launch {
+          val (text, nxt) = vm.readChunk(entity, 0L, CHUNK_BYTES)
+          preview = text
+          nextOffset = nxt
+          expanded = true
         }
+      }) { Text("View") }
 
-        if (expanded) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 120.dp, max = 400.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Text(preview, color = Color(0xFFDDDDDD))
-                if (nextOffset > 0) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(onClick = {
-                        coroutine.launch {
-                            val (text, nxt) = vm.readChunk(entity, nextOffset, CHUNK_BYTES)
-                            preview += text.take(MAX_PREVIEW_CHARS)
-                            nextOffset = nxt
-                        }
-                    }) { Text("Load more") }
-                }
+      Button(onClick = {
+        if (!treeLoading) {
+          treeLoading = true
+          showTree = false
+          coroutine.launch {
+            try {
+              val full = vm.generateProjectTree(entity)
+              // truncate for UI safety
+              projectTree = if (full.length > MAX_DISPLAY_TREE_CHARS) {
+                full.take(MAX_DISPLAY_TREE_CHARS) + "\n\n[truncated display]"
+              } else full
+              showTree = true
+            } catch (e: Exception) {
+              // ViewModel already reports error; ensure UI doesn't crash
+              projectTree = "Failed to generate project tree."
+              showTree = true
+            } finally {
+              treeLoading = false
             }
+          }
         }
+      }) {
+        Text(if (treeLoading) "Generating..." else "Project Tree")
+      }
 
-        if (showTree && projectTree.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 120.dp, max = 400.dp)
-                    .verticalScroll(rememberScrollState())
-                    .background(Color(0xFF2E2E2E))
-                    .padding(8.dp)
-            ) {
-                Text(projectTree, color = Color(0xFFAAFFAA))
-            }
-        }
+      Button(onClick = { vm.delete(entity) }) { Text("Delete") }
     }
+
+    if (expanded) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Column(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 400.dp).verticalScroll(rememberScrollState())) {
+        Text(preview, color = Color(0xFFDDDDDD))
+      }
+    }
+
+    if (showTree && projectTree.isNotEmpty()) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Column(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 400.dp).verticalScroll(rememberScrollState()).background(Color(0xFF2E2E2E)).padding(8.dp)) {
+        Text(projectTree, color = Color(0xFFAAFFAA))
+      }
+    }
+  }
 }

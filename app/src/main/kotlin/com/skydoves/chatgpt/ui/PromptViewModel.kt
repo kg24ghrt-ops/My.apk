@@ -16,79 +16,67 @@ import java.io.StringWriter
 
 class PromptViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repo = PromptRepository(application.applicationContext)
+  private val repo = PromptRepository(application.applicationContext)
 
-    // ------------------- FILE LIST -------------------
-    val filesFlow = repo.allFilesFlow()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+  // observable list of prompt files
+  val filesFlow = repo.allFilesFlow()
+    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    // ------------------- ERROR REPORTING -------------------
-    private val _errorFlow = MutableStateFlow<String?>(null)
-    val errorFlow: StateFlow<String?> = _errorFlow
+  // simple string error reporting for UI (compose-friendly)
+  private val _errorFlow = MutableStateFlow<String?>(null)
+  val errorFlow: StateFlow<String?> = _errorFlow
 
-    private fun reportError(tag: String, throwable: Throwable) {
-        val sw = StringWriter()
-        throwable.printStackTrace(PrintWriter(sw))
+  private fun reportError(tag: String, throwable: Throwable) {
+    val sw = StringWriter()
+    throwable.printStackTrace(PrintWriter(sw))
+    val message = buildString {
+      append("❌ $tag\n")
+      append(throwable.message ?: "No message")
+      append("\n\nStack (truncated):\n")
+      append(sw.toString().take(1200)) // cap stack text for UI
+    }
+    _errorFlow.value = message
+  }
 
-        _errorFlow.value =
-            """
-            ❌ ERROR: $tag
-            
-            Message:
-            ${throwable.message ?: "No message"}
-            
-            Stack trace:
-            $sw
-            """.trimIndent()
+  fun clearError() { _errorFlow.value = null }
+
+  // ------------------- IMPORT -------------------
+  fun importUri(uri: Uri, displayName: String?) {
+    viewModelScope.launch {
+      try {
+        repo.importUriAsFile(uri, displayName)
+      } catch (e: Exception) {
+        reportError("Import URI", e)
+      }
+    }
+  }
+
+  // ------------------- DELETE -------------------
+  fun delete(entity: PromptFileEntity) {
+    viewModelScope.launch {
+      try {
+        repo.delete(entity)
+      } catch (e: Exception) {
+        reportError("Delete file", e)
+      }
+    }
+  }
+
+  // ------------------- READ CHUNK -------------------
+  suspend fun readChunk(entity: PromptFileEntity, offset: Long, chunkSize: Int) =
+    try {
+      repo.readChunk(entity, offset, chunkSize)
+    } catch (e: Exception) {
+      reportError("Read chunk (${entity.displayName})", e)
+      "" to -1L
     }
 
-    fun clearError() {
-        _errorFlow.value = null
-    }
-
-    // ------------------- IMPORT -------------------
-    fun importUri(uri: Uri, displayName: String?) {
-        viewModelScope.launch {
-            try {
-                repo.importUriAsFile(uri, displayName)
-            } catch (e: Exception) {
-                reportError("Import URI", e)
-            }
-        }
-    }
-
-    // ------------------- DELETE -------------------
-    fun delete(entity: PromptFileEntity) {
-        viewModelScope.launch {
-            try {
-                repo.delete(entity)
-            } catch (e: Exception) {
-                reportError("Delete file", e)
-            }
-        }
-    }
-
-    // ------------------- READ CHUNK -------------------
-    suspend fun readChunk(
-        entity: PromptFileEntity,
-        offset: Long,
-        chunkSize: Int
-    ): Pair<String, Long> {
-        return try {
-            repo.readChunk(entity, offset, chunkSize)
-        } catch (e: Exception) {
-            reportError("Read chunk (${entity.displayName})", e)
-            "" to -1L
-        }
-    }
-
-    // ------------------- PROJECT TREE -------------------
-    suspend fun generateProjectTree(entity: PromptFileEntity): String {
-        return try {
-            repo.generateProjectTreeFromZip(entity)
-        } catch (e: Exception) {
-            reportError("Generate project tree (${entity.displayName})", e)
-            "❌ Failed to generate project tree.\nSee error report above."
-        }
+  // ------------------- PROJECT TREE -------------------
+  suspend fun generateProjectTree(entity: PromptFileEntity): String =
+    try {
+      repo.generateProjectTreeFromZip(entity)
+    } catch (e: Exception) {
+      reportError("Generate project tree (${entity.displayName})", e)
+      "❌ Failed to generate project tree. See error panel."
     }
 }
