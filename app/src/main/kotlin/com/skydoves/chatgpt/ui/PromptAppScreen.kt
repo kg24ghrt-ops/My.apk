@@ -1,5 +1,3 @@
-@file:OptIn(androidx.lifecycle.compose.ExperimentalLifecycleComposeApi::class)
-
 package com.skydoves.chatgpt.ui
 
 import android.content.Context
@@ -23,19 +21,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
 import kotlinx.coroutines.launch
 
-private const val CHUNK_BYTES = 32 * 1024 // 32 KB chunks
+private const val CHUNK_BYTES = 32 * 1024
 
 @Composable
 fun PromptAppScreen() {
     val vm: PromptViewModel = viewModel()
     val ctx = LocalContext.current
-    val files by vm.filesFlow.collectAsStateWithLifecycle(emptyList())
-    val error by vm.errorFlow.collectAsStateWithLifecycle()
+    // Use Compose's collectAsState on the StateFlow (no experimental lifecycle API required)
+    val files by vm.filesFlow.collectAsState(initial = emptyList())
+    val errorMessage by vm.errorFlow.collectAsState(initial = null)
 
     Column(
         modifier = Modifier
@@ -43,9 +41,9 @@ fun PromptAppScreen() {
             .background(Color(0xFF121212))
             .padding(12.dp)
     ) {
-        // 🔴 ERROR PANEL (no crash)
-        error?.let {
-            ErrorPanel(it) { vm.clearError() }
+        // 🔴 ERROR PANEL (no crash) - shows string error messages from ViewModel
+        errorMessage?.let {
+            ErrorPanelMessage(it) { vm.clearError() }
             Spacer(modifier = Modifier.height(8.dp))
         }
 
@@ -69,36 +67,31 @@ fun PromptAppScreen() {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(files) { f -> FileRow(f, vm, ctx) }
+                items(files) { f ->
+                    FileRow(f, vm, ctx)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ErrorPanel(error: ErrorReport, onDismiss: () -> Unit) {
+private fun ErrorPanelMessage(errorText: String, onDismiss: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFFB00020))
             .padding(10.dp)
     ) {
+        // show first line as a small heading if available
+        val firstLine = errorText.lineSequence().firstOrNull() ?: "Error"
         Text(
-            error.title,
+            firstLine,
             color = Color.White,
             style = MaterialTheme.typography.titleMedium
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text(error.message, color = Color.White)
-
-        error.stackTrace?.let {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                it.take(1000),
-                color = Color(0xFFFFCDD2),
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
+        Text(errorText, color = Color.White, style = MaterialTheme.typography.bodySmall)
 
         Spacer(modifier = Modifier.height(8.dp))
         Button(onClick = onDismiss) {
