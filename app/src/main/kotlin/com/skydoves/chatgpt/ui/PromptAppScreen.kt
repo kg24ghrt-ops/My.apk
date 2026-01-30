@@ -1,3 +1,5 @@
+@file:OptIn(androidx.lifecycle.compose.ExperimentalLifecycleComposeApi::class)
+
 package com.skydoves.chatgpt.ui
 
 import android.content.Context
@@ -26,7 +28,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
 import kotlinx.coroutines.launch
 
-private const val CHUNK_BYTES = 32 * 1024
+private const val CHUNK_BYTES = 32 * 1024 // 32 KB chunks
 
 @Composable
 fun PromptAppScreen() {
@@ -41,7 +43,6 @@ fun PromptAppScreen() {
             .background(Color(0xFF121212))
             .padding(12.dp)
     ) {
-
         // 🔴 ERROR PANEL (no crash)
         error?.let {
             ErrorPanel(it) { vm.clearError() }
@@ -68,9 +69,7 @@ fun PromptAppScreen() {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(files) { f ->
-                    FileRow(f, vm, ctx)
-                }
+                items(files) { f -> FileRow(f, vm, ctx) }
             }
         }
     }
@@ -179,7 +178,6 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
     ) {
         Text("Name: ${entity.displayName}", color = Color(0xFF00BCD4))
         Text("Size: ${entity.fileSizeBytes} bytes", color = Color(0xFFEEEEEE))
-
         Spacer(modifier = Modifier.height(6.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
