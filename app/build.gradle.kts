@@ -93,6 +93,7 @@ dependencies {
  
   // core modules
  
+  implementation("androidx.compose.material3:material3:1.2.0")
   implementation(project(":core-designsystem"))
   implementation(project(":core-navigation"))
   implementation(project(":core-data"))
@@ -142,6 +143,7 @@ dependencies {
 
   // baseline profile
   baselineProfile(project(":benchmark"))
+  
 }
 if (file("google-services.json").exists()) {
   apply(plugin = libs.plugins.gms.googleServices.get().pluginId)
