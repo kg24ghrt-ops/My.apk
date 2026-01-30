@@ -1,7 +1,10 @@
 package com.skydoves.chatgpt.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -32,6 +35,7 @@ private const val MAX_DISPLAY_TREE_CHARS = 120_000 // cap characters shown in UI
 fun PromptAppScreen() {
   val vm: PromptViewModel = viewModel()
   val ctx = LocalContext.current
+  // Using collectAsState (StateFlow -> Compose state)
   val files by vm.filesFlow.collectAsState(initial = emptyList())
   val errorMessage by vm.errorFlow.collectAsState(initial = null)
 
@@ -112,8 +116,13 @@ private fun FileImportRow(vm: PromptViewModel) {
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
     Box(modifier = Modifier.weight(1f).background(Color(0xFF1E1E1E)).padding(8.dp)) {
       if (displayName.isEmpty()) Text("Optional display name", color = Color(0xFF888888))
-      BasicTextField(value = displayName, onValueChange = { displayName = it }, singleLine = true,
-        textStyle = TextStyle(color = Color.White), modifier = Modifier.fillMaxWidth())
+      BasicTextField(
+        value = displayName,
+        onValueChange = { displayName = it },
+        singleLine = true,
+        textStyle = TextStyle(color = Color.White),
+        modifier = Modifier.fillMaxWidth()
+      )
     }
     Button(onClick = { launcher.launch("*/*") }) { Text("Import") }
   }
@@ -122,10 +131,15 @@ private fun FileImportRow(vm: PromptViewModel) {
 @Composable
 private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context) {
   val coroutine = rememberCoroutineScope()
+  val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
   var preview by remember { mutableStateOf("") }
   var nextOffset by remember { mutableStateOf(0L) }
   var expanded by remember { mutableStateOf(false) }
-  var projectTree by remember { mutableStateOf("") }
+
+  // project tree states: truncated shown in UI, full stored for clipboard/sharing
+  var projectTree by remember { mutableStateOf("") }      // truncated for UI
+  var fullProjectTree by remember { mutableStateOf("") }  // full text for copy/share
   var showTree by remember { mutableStateOf(false) }
   var treeLoading by remember { mutableStateOf(false) }
 
@@ -137,10 +151,15 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
       Button(onClick = {
         coroutine.launch {
-          val (text, nxt) = vm.readChunk(entity, 0L, CHUNK_BYTES)
-          preview = text
-          nextOffset = nxt
-          expanded = true
+          try {
+            val (text, nxt) = vm.readChunk(entity, 0L, CHUNK_BYTES)
+            preview = text
+            nextOffset = nxt
+            expanded = true
+          } catch (e: Exception) {
+            // ViewModel reports error; keep UI stable
+            preview = "Failed to load preview."
+          }
         }
       }) { Text("View") }
 
@@ -151,14 +170,15 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
           coroutine.launch {
             try {
               val full = vm.generateProjectTree(entity)
-              // truncate for UI safety
+              fullProjectTree = full
               projectTree = if (full.length > MAX_DISPLAY_TREE_CHARS) {
                 full.take(MAX_DISPLAY_TREE_CHARS) + "\n\n[truncated display]"
               } else full
               showTree = true
             } catch (e: Exception) {
-              // ViewModel already reports error; ensure UI doesn't crash
+              // ViewModel should already report the error to errorFlow; fallback message
               projectTree = "Failed to generate project tree."
+              fullProjectTree = ""
               showTree = true
             } finally {
               treeLoading = false
@@ -169,6 +189,18 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
         Text(if (treeLoading) "Generating..." else "Project Tree")
       }
 
+      Button(onClick = {
+        if (fullProjectTree.isNotEmpty()) {
+          val clip = ClipData.newPlainText("Project Tree - ${entity.displayName}", fullProjectTree)
+          clipboard.setPrimaryClip(clip)
+          Toast.makeText(ctx, "Project tree copied", Toast.LENGTH_SHORT).show()
+        } else {
+          Toast.makeText(ctx, "No project tree to copy", Toast.LENGTH_SHORT).show()
+        }
+      }) {
+        Text("Copy Tree")
+      }
+
       Button(onClick = { vm.delete(entity) }) { Text("Delete") }
     }
 
@@ -176,6 +208,22 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
       Spacer(modifier = Modifier.height(8.dp))
       Column(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 400.dp).verticalScroll(rememberScrollState())) {
         Text(preview, color = Color(0xFFDDDDDD))
+        if (nextOffset > 0) {
+          Spacer(modifier = Modifier.height(8.dp))
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+              coroutine.launch {
+                try {
+                  val (text, nxt) = vm.readChunk(entity, nextOffset, CHUNK_BYTES)
+                  preview += "\n" + text
+                  nextOffset = nxt
+                } catch (_: Exception) {
+                  // ignore, UI stable
+                }
+              }
+            }) { Text("Load more") }
+          }
+        }
       }
     }
 
