@@ -23,15 +23,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val CHUNK_BYTES = 32 * 1024
+private const val MAX_PREVIEW_CHARS = 5000 // truncate preview for huge files
 
 @Composable
 fun PromptAppScreen() {
     val vm: PromptViewModel = viewModel()
     val ctx = LocalContext.current
-    // Use Compose's collectAsState on the StateFlow (no experimental lifecycle API required)
     val files by vm.filesFlow.collectAsState(initial = emptyList())
     val errorMessage by vm.errorFlow.collectAsState(initial = null)
 
@@ -41,7 +43,6 @@ fun PromptAppScreen() {
             .background(Color(0xFF121212))
             .padding(12.dp)
     ) {
-        // 🔴 ERROR PANEL (no crash) - shows string error messages from ViewModel
         errorMessage?.let {
             ErrorPanelMessage(it) { vm.clearError() }
             Spacer(modifier = Modifier.height(8.dp))
@@ -83,7 +84,6 @@ private fun ErrorPanelMessage(errorText: String, onDismiss: () -> Unit) {
             .background(Color(0xFFB00020))
             .padding(10.dp)
     ) {
-        // show first line as a small heading if available
         val firstLine = errorText.lineSequence().firstOrNull() ?: "Error"
         Text(
             firstLine,
@@ -92,7 +92,6 @@ private fun ErrorPanelMessage(errorText: String, onDismiss: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(errorText, color = Color.White, style = MaterialTheme.typography.bodySmall)
-
         Spacer(modifier = Modifier.height(8.dp))
         Button(onClick = onDismiss) {
             Text("Dismiss")
@@ -162,6 +161,7 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
     var expanded by remember { mutableStateOf(false) }
     var projectTree by remember { mutableStateOf("") }
     var showTree by remember { mutableStateOf(false) }
+    var loadingTree by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -174,11 +174,10 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
         Spacer(modifier = Modifier.height(6.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-
             Button(onClick = {
                 coroutine.launch {
                     val (text, nxt) = vm.readChunk(entity, 0L, CHUNK_BYTES)
-                    preview = text
+                    preview = text.take(MAX_PREVIEW_CHARS)
                     nextOffset = nxt
                     expanded = true
                 }
@@ -186,10 +185,19 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
 
             Button(onClick = {
                 coroutine.launch {
-                    projectTree = vm.generateProjectTree(entity)
-                    showTree = true
+                    loadingTree = true
+                    try {
+                        projectTree = withContext(Dispatchers.IO) {
+                            vm.generateProjectTree(entity)
+                        }.take(10000) // truncate large tree safely
+                        showTree = true
+                    } catch (e: Exception) {
+                        vm.reportError("Generate project tree failed: ${e.message}")
+                    } finally {
+                        loadingTree = false
+                    }
                 }
-            }) { Text("Project Tree") }
+            }) { Text(if (loadingTree) "Generating..." else "Project Tree") }
 
             Button(onClick = { vm.delete(entity) }) { Text("Delete") }
         }
@@ -203,6 +211,16 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context)
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(preview, color = Color(0xFFDDDDDD))
+                if (nextOffset > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(onClick = {
+                        coroutine.launch {
+                            val (text, nxt) = vm.readChunk(entity, nextOffset, CHUNK_BYTES)
+                            preview += text.take(MAX_PREVIEW_CHARS)
+                            nextOffset = nxt
+                        }
+                    }) { Text("Load more") }
+                }
             }
         }
 
