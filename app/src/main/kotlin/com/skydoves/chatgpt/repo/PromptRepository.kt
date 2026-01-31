@@ -9,7 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
-import java.nio.charset.MalformedInputException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
@@ -20,38 +19,11 @@ class PromptRepository(private val context: Context) {
     private val dao = db.promptFileDao()
     private val sharedBuffer = ByteArray(8192)
 
-    private val IGNORED_PATHS = listOf(
-        "/node_modules/", "/.git/", "/build/", "/.gradle/", "/.idea/",
-        "/target/", "/bin/", "/out/", "/vendor/", "/.next/", "/.venv/"
-    )
-
-    private val IGNORED_FILES = listOf(
-        "package-lock.json", "yarn.lock", "gradlew", "gradlew.bat",
-        ".DS_Store", "LICENSE", "gradle-wrapper.properties"
-    )
+    private val IGNORED_PATHS = listOf("/node_modules/", "/.git/", "/build/", "/.gradle/", "/.idea/")
+    private val IGNORED_FILES = listOf("package-lock.json", "yarn.lock", ".DS_Store", "LICENSE")
 
     fun allFilesFlow() = dao.observeAll()
-    suspend fun getById(id: Long) = dao.getById(id)
 
-    suspend fun importUriAsFile(uri: Uri, displayName: String?): Long = withContext(Dispatchers.IO) {
-        val nameHint = displayName ?: queryFileName(uri) ?: "file_${System.currentTimeMillis()}"
-        val safeName = nameHint.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-        val originalFile = File(appContext.filesDir, "imported_$safeName")
-
-        appContext.contentResolver.openInputStream(uri)?.use { input ->
-            originalFile.outputStream().use { out -> input.copyTo(out) }
-        } ?: throw IllegalArgumentException("Cannot open URI: $uri")
-
-        val entity = PromptFileEntity(
-            displayName = safeName,
-            filePath = originalFile.absolutePath,
-            language = if (safeName.endsWith(".zip", true)) "zip" else guessLanguageFromName(safeName),
-            fileSizeBytes = originalFile.length()
-        )
-        return@withContext dao.insert(entity)
-    }
-
-    // --- UPDATED: SELECTIVE BUNDLING LOGIC ---
     suspend fun bundleContextForAI(
         entity: PromptFileEntity,
         includeTree: Boolean,
@@ -61,8 +33,9 @@ class PromptRepository(private val context: Context) {
     ): String = withContext(Dispatchers.IO) {
         dao.updateLastAccessed(entity.id)
         
-        val tree = if (includeTree) (entity.lastKnownTree ?: generateProjectTreeFromZip(entity)) else null
-        val summary = if (includeSummary) (entity.summary ?: "No summary available.") else null
+        // FORCE REBUILD: We pass includePreview down to ensure the tree matches the toggle
+        val tree = if (includeTree) generateProjectTreeFromZip(entity, includePreview) else null
+        val summary = if (includeSummary) (entity.summary ?: "Standard Project Analysis") else null
 
         StringBuilder().apply {
             append("### DEV-AI CONTEXT: ${entity.displayName}\n")
@@ -72,127 +45,96 @@ class PromptRepository(private val context: Context) {
             }
 
             if (includeTree && !tree.isNullOrBlank()) {
-                append("#### DIRECTORY STRUCTURE\n")
+                append("#### DIRECTORY & SOURCE STRUCTURE\n")
                 append("```text\n$tree\n```\n\n")
-            }
-
-            if (includePreview) {
-                append("#### SOURCE PREVIEW\n")
-                append("(Significant code snippets from the main project files are included below)\n\n")
-                // Logic to append previews would go here or be part of the tree generator
             }
 
             if (includeInstructions) {
                 append("#### TASK & INSTRUCTIONS\n")
-                append("1. Analyze the provided project architecture.\n")
-                append("2. Identify core logic and potential edge cases.\n")
-                append("3. Provide concise, expert-level implementation advice.\n")
+                append("Analyze the provided project. Identify core logic and provide implementation advice.\n")
             }
         }.toString()
     }
 
-    // --- UPDATED: BINARY-AWARE TREE GENERATION ---
-    suspend fun generateProjectTreeFromZip(entity: PromptFileEntity): String = withContext(Dispatchers.IO) {
+    suspend fun generateProjectTreeFromZip(
+        entity: PromptFileEntity, 
+        includeContent: Boolean = false // NEW: Parameter to control content inclusion
+    ): String = withContext(Dispatchers.IO) {
         val zipFile = File(entity.filePath)
         if (!zipFile.exists()) return@withContext "ZIP missing."
 
-        val MAX_TOTAL_CHARS = 120_000
-        val MAX_FILE_CHARS = 3_000 
-        val treeBuilder = StringBuilder(65536)
+        val treeBuilder = StringBuilder()
+        val MAX_FILE_CHARS = 2_000 
 
         try {
-            ZipInputStream(BufferedInputStream(zipFile.inputStream(), 32768)).use { zip ->
+            ZipInputStream(BufferedInputStream(zipFile.inputStream())).use { zip ->
                 var entry: ZipEntry? = zip.nextEntry
-                while (entry != null && treeBuilder.length < MAX_TOTAL_CHARS) {
-                    
+                while (entry != null) {
                     if (shouldIgnore(entry.name)) {
                         zip.closeEntry()
                         entry = zip.nextEntry
                         continue
                     }
 
-                    if (!entry.isDirectory && looksLikeTextOrCode(entry.name)) {
-                        val depth = entry.name.count { it == '/' }
-                        val indent = "│   ".repeat(depth)
-                        val fileName = entry.name.substringAfterLast('/')
+                    val depth = entry.name.count { it == '/' }
+                    val indent = "  ".repeat(depth)
+                    val fileName = entry.name.substringAfterLast('/')
+                    
+                    if (entry.isDirectory) {
+                        treeBuilder.append("$indent📁 $fileName/\n")
+                    } else {
+                        treeBuilder.append("$indent📄 $fileName\n")
                         
-                        treeBuilder.append(indent).append("├── $fileName\n")
-                        
-                        val contentIndent = "│   ".repeat(depth + 1)
-                        var charsReadForFile = 0
-                        
-                        // Buffer content to check for binary signatures
-                        val fileBytes = mutableListOf<Byte>()
-                        var bytesRead = zip.read(sharedBuffer)
-                        
-                        while (bytesRead > 0 && charsReadForFile < MAX_FILE_CHARS) {
-                            // Check for null bytes (Binary indicator)
-                            if (sharedBuffer.take(bytesRead).any { it == 0.toByte() }) {
-                                treeBuilder.append(contentIndent).append("[Binary Content Skipped]\n")
-                                break
-                            }
-
-                            val chunk = String(sharedBuffer, 0, bytesRead, Charsets.UTF_8)
-                            chunk.split('\n').forEach { line ->
-                                if (treeBuilder.length < MAX_TOTAL_CHARS && line.isNotBlank()) {
-                                    treeBuilder.append(contentIndent).append(line.trim()).append("\n")
+                        // ONLY READ CONTENT IF PREVIEW TOGGLE IS ON
+                        if (includeContent && looksLikeTextOrCode(entry.name)) {
+                            val contentIndent = "$indent    "
+                            val bytesRead = zip.read(sharedBuffer)
+                            if (bytesRead > 0) {
+                                val chunk = String(sharedBuffer, 0, bytesRead, Charsets.UTF_8)
+                                chunk.lineSequence().take(10).forEach { line ->
+                                    if (line.isNotBlank()) treeBuilder.append("$contentIndent$line\n")
                                 }
                             }
-
-                            charsReadForFile += bytesRead
-                            if (treeBuilder.length >= MAX_TOTAL_CHARS) break
-                            bytesRead = zip.read(sharedBuffer)
                         }
                     }
                     zip.closeEntry()
                     entry = zip.nextEntry
                 }
             }
-            
-            val finalTree = treeBuilder.toString()
-            dao.updateTree(entity.id, finalTree)
-            return@withContext finalTree
-            
+            return@withContext treeBuilder.toString()
         } catch (e: Exception) {
-            return@withContext "Error packaging: ${e.localizedMessage}"
+            return@withContext "Error: ${e.localizedMessage}"
         }
     }
 
-    private fun shouldIgnore(path: String): Boolean {
-        val normalized = "/$path".lowercase()
-        val fileName = path.substringAfterLast('/').lowercase()
-        if (IGNORED_PATHS.any { normalized.contains(it) }) return true
-        if (IGNORED_FILES.any { fileName == it }) return true
-        if (fileName.startsWith(".") && fileName != ".gitignore" && fileName != ".env") return true
-        return false
+    private fun shouldIgnore(path: String) = IGNORED_PATHS.any { path.contains(it) } || IGNORED_FILES.any { path.endsWith(it) }
+
+    private fun looksLikeTextOrCode(name: String): Boolean {
+        val ext = listOf(".kt", ".java", ".xml", ".json", ".md", ".txt", ".gradle", ".js", ".py")
+        return ext.any { name.lowercase().endsWith(it) }
     }
 
-    suspend fun readChunk(entity: PromptFileEntity, offsetBytes: Long, chunkSizeBytes: Int): Pair<String, Long> =
-        withContext(Dispatchers.IO) {
-            val file = File(entity.filePath)
-            if (!file.exists()) return@withContext "" to -1L
-            
-            java.io.RandomAccessFile(file, "r").use { raf ->
-                if (offsetBytes >= raf.length()) return@withContext "" to -1L
-                raf.seek(offsetBytes)
-                val actualToRead = minOf(chunkSizeBytes, (raf.length() - offsetBytes).toInt())
-                val localBuffer = ByteArray(actualToRead)
-                val read = raf.read(localBuffer, 0, actualToRead)
-                
-                // VALIDATION: Ensure we don't return binary gibberish to the UI
-                val text = try {
-                    if (localBuffer.take(read).any { it == 0.toByte() }) {
-                        "[Binary File]"
-                    } else {
-                        String(localBuffer, 0, read, Charsets.UTF_8)
-                    }
-                } catch (e: Exception) {
-                    "[Decode Error]"
-                }
-                
-                text to (if (offsetBytes + read >= raf.length()) -1L else offsetBytes + read)
-            }
+    suspend fun importUriAsFile(uri: Uri, displayName: String?): Long = withContext(Dispatchers.IO) {
+        val nameHint = displayName ?: queryFileName(uri) ?: "file_${System.currentTimeMillis()}"
+        val originalFile = File(appContext.filesDir, nameHint)
+        appContext.contentResolver.openInputStream(uri)?.use { input ->
+            originalFile.outputStream().use { out -> input.copyTo(out) }
         }
+        val entity = PromptFileEntity(displayName = nameHint, filePath = originalFile.absolutePath, 
+            language = if (nameHint.endsWith(".zip")) "zip" else "text", fileSizeBytes = originalFile.length())
+        dao.insert(entity)
+    }
+
+    suspend fun readChunk(entity: PromptFileEntity, offset: Long, size: Int): Pair<String, Long> = withContext(Dispatchers.IO) {
+        val file = File(entity.filePath)
+        if (!file.exists()) return@withContext "" to -1L
+        val buffer = ByteArray(size)
+        java.io.RandomAccessFile(file, "r").use { raf ->
+            raf.seek(offset)
+            val read = raf.read(buffer)
+            String(buffer, 0, read) to (if (offset + read >= raf.length()) -1L else offset + read)
+        }
+    }
 
     suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {
         dao.delete(entity)
@@ -204,22 +146,6 @@ class PromptRepository(private val context: Context) {
             appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                 if (it.moveToFirst()) it.getString(it.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
             }
-        } catch (e: Exception) { null } ?: uri.lastPathSegment
-    }
-
-    private fun looksLikeTextOrCode(name: String): Boolean {
-        val lower = name.lowercase()
-        val extensions = listOf(".kt", ".java", ".xml", ".json", ".md", ".txt", ".gradle", ".properties", ".yml", ".yaml", ".js", ".ts", ".html", ".css", ".py", ".cpp", ".h")
-        return extensions.any { lower.endsWith(it) }
-    }
-
-    private fun guessLanguageFromName(name: String): String? = when {
-        name.endsWith(".kt") -> "kotlin"
-        name.endsWith(".java") -> "java"
-        name.endsWith(".py") -> "python"
-        name.endsWith(".xml") -> "xml"
-        name.endsWith(".json") -> "json"
-        name.endsWith(".md") -> "markdown"
-        else -> null
+        } catch (e: Exception) { null }
     }
 }
