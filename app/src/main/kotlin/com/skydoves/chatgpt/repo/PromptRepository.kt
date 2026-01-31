@@ -1,7 +1,6 @@
 package com.skydoves.chatgpt.repo
 
 import android.content.Context
-import android.database.Cursor
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.skydoves.chatgpt.data.AppDatabase
@@ -18,14 +17,22 @@ class PromptRepository(private val context: Context) {
   private val appContext = context.applicationContext
   private val db = AppDatabase.getInstance(appContext)
   private val dao = db.promptFileDao()
-
-  // REUSABLE BUFFER: Prevents memory thrashing
   private val sharedBuffer = ByteArray(8192)
+
+  // --- SELECTIVE PACKAGING: THE IGNORE ENGINE ---
+  private val IGNORED_PATHS = listOf(
+    "/node_modules/", "/.git/", "/build/", "/.gradle/", "/.idea/", 
+    "/target/", "/bin/", "/out/", "/vendor/", "/.next/", "/.venv/"
+  )
+  
+  private val IGNORED_FILES = listOf(
+    "package-lock.json", "yarn.lock", "gradlew", "gradlew.bat", 
+    ".DS_Store", "LICENSE", "gradle-wrapper.properties"
+  )
 
   fun allFilesFlow() = dao.observeAll()
   suspend fun getById(id: Long) = dao.getById(id)
 
-  // ------------------- IMPORT -------------------
   suspend fun importUriAsFile(uri: Uri, displayName: String?): Long = withContext(Dispatchers.IO) {
     val nameHint = displayName ?: queryFileName(uri) ?: "file_${System.currentTimeMillis()}"
     val safeName = nameHint.replace(Regex("[^a-zA-Z0-9._-]"), "_")
@@ -44,46 +51,46 @@ class PromptRepository(private val context: Context) {
     return@withContext dao.insert(entity)
   }
 
-  // ------------------- AI CONTEXT WRAPPER -------------------
   suspend fun bundleContextForAI(entity: PromptFileEntity): String = withContext(Dispatchers.IO) {
     dao.updateLastAccessed(entity.id)
-    
     val tree = entity.lastKnownTree ?: generateProjectTreeFromZip(entity)
-    val summary = entity.summary ?: "No summary provided."
-
-    // Pre-allocate space for a large prompt to avoid memory re-allocations
-    StringBuilder(tree.length + 500).apply {
-      append("### PROJECT CONTEXT WRAPPER\n")
-      append("**File/Project Name:** ${entity.displayName}\n")
-      append("**Summary:** $summary\n\n")
-      append("#### PROJECT STRUCTURE\n")
-      append("```text\n")
-      append(tree)
-      append("\n```\n\n")
-      append("#### TASK\n")
-      append("Please analyze the project structure above and provide insights.")
+    
+    StringBuilder().apply {
+      append("### PROJECT CONTEXT: ${entity.displayName}\n")
+      append("#### DIRECTORY STRUCTURE (FILTERED)\n")
+      append("```text\n$tree\n```\n")
+      append("#### INSTRUCTIONS\n")
+      append("Analyze the provided structure and logic. Ignore system-generated files.")
     }.toString()
   }
 
-  // ------------------- OPTIMIZED PROJECT TREE GENERATOR -------------------
+  // --- SELECTIVE TREE GENERATION ---
   suspend fun generateProjectTreeFromZip(entity: PromptFileEntity): String = withContext(Dispatchers.IO) {
     val zipFile = File(entity.filePath)
     if (!zipFile.exists()) return@withContext "ZIP missing."
 
     val MAX_TOTAL_CHARS = 120_000
-    val MAX_FILE_CHARS = 5_000
-    // Pre-allocate 64KB for the builder
+    val MAX_FILE_CHARS = 3_000 // Slightly smaller per-file limit to fit more files
     val treeBuilder = StringBuilder(65536)
 
     try {
-      // Use 32KB buffer for the input stream to minimize disk seek overhead
       ZipInputStream(BufferedInputStream(zipFile.inputStream(), 32768)).use { zip ->
         var entry: ZipEntry? = zip.nextEntry
         while (entry != null && treeBuilder.length < MAX_TOTAL_CHARS) {
+          
+          // CRITICAL: Selective Filtering Logic
+          if (shouldIgnore(entry.name)) {
+            zip.closeEntry()
+            entry = zip.nextEntry
+            continue
+          }
+
           if (!entry.isDirectory && looksLikeTextOrCode(entry.name)) {
             val depth = entry.name.count { it == '/' }
             val indent = "│   ".repeat(depth)
-            treeBuilder.append(indent).append("├─ ${entry.name.substringAfterLast('/')}\n")
+            val fileName = entry.name.substringAfterLast('/')
+            
+            treeBuilder.append(indent).append("├── $fileName\n")
             
             val contentIndent = "│   ".repeat(depth + 1)
             var charsReadForFile = 0
@@ -92,10 +99,9 @@ class PromptRepository(private val context: Context) {
             while (bytesRead > 0 && charsReadForFile < MAX_FILE_CHARS) {
               val chunk = String(sharedBuffer, 0, bytesRead, Charsets.UTF_8)
               
-              // Optimized line-by-line indenting
               chunk.split('\n').forEach { line ->
-                if (treeBuilder.length < MAX_TOTAL_CHARS) {
-                  treeBuilder.append(contentIndent).append(line).append("\n")
+                if (treeBuilder.length < MAX_TOTAL_CHARS && line.isNotBlank()) {
+                  treeBuilder.append(contentIndent).append(line.trim()).append("\n")
                 }
               }
 
@@ -114,11 +120,27 @@ class PromptRepository(private val context: Context) {
       return@withContext finalTree
       
     } catch (e: Exception) {
-      return@withContext "Error reading tree: ${e.localizedMessage}"
+      return@withContext "Error packaging: ${e.localizedMessage}"
     }
   }
 
-  // ------------------- OPTIMIZED CHUNK READING -------------------
+  // --- FILTERING LOGIC ---
+  private fun shouldIgnore(path: String): Boolean {
+    val normalized = "/$path".lowercase()
+    val fileName = path.substringAfterLast('/').lowercase()
+    
+    // Check if path contains ignored directories
+    if (IGNORED_PATHS.any { normalized.contains(it) }) return true
+    
+    // Check if filename is in blacklist
+    if (IGNORED_FILES.any { fileName == it }) return true
+    
+    // Ignore hidden files (starting with dot) except common config files
+    if (fileName.startsWith(".") && fileName != ".gitignore" && fileName != ".env") return true
+    
+    return false
+  }
+
   suspend fun readChunk(entity: PromptFileEntity, offsetBytes: Long, chunkSizeBytes: Int): Pair<String, Long> =
     withContext(Dispatchers.IO) {
       val file = File(entity.filePath)
@@ -126,16 +148,12 @@ class PromptRepository(private val context: Context) {
       
       java.io.RandomAccessFile(file, "r").use { raf ->
         if (offsetBytes >= raf.length()) return@withContext "" to -1L
-        
         raf.seek(offsetBytes)
         val actualToRead = minOf(chunkSizeBytes, (raf.length() - offsetBytes).toInt())
         val localBuffer = if (actualToRead <= sharedBuffer.size) sharedBuffer else ByteArray(actualToRead)
-        
         val read = raf.read(localBuffer, 0, actualToRead)
         val text = String(localBuffer, 0, read, Charsets.UTF_8)
-        
-        val next = if (offsetBytes + read >= raf.length()) -1L else offsetBytes + read
-        text to next
+        text to (if (offsetBytes + read >= raf.length()) -1L else offsetBytes + read)
       }
     }
 
@@ -154,12 +172,13 @@ class PromptRepository(private val context: Context) {
 
   private fun looksLikeTextOrCode(name: String): Boolean {
     val lower = name.lowercase()
-    return listOf(".kt", ".java", ".xml", ".json", ".md", ".txt", ".gradle", ".properties", ".yml", ".yaml", ".js", ".ts", ".html", ".css").any { lower.endsWith(it) }
+    return listOf(".kt", ".java", ".xml", ".json", ".md", ".txt", ".gradle", ".properties", ".yml", ".yaml", ".js", ".ts", ".html", ".css", ".py", ".cpp", ".h").any { lower.endsWith(it) }
   }
 
   private fun guessLanguageFromName(name: String): String? = when {
     name.endsWith(".kt") -> "kotlin"
     name.endsWith(".java") -> "java"
+    name.endsWith(".py") -> "python"
     name.endsWith(".xml") -> "xml"
     name.endsWith(".json") -> "json"
     name.endsWith(".md") -> "markdown"
