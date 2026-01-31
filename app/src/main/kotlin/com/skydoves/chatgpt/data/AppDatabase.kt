@@ -9,8 +9,8 @@ import com.skydoves.chatgpt.data.entity.PromptFileEntity
 
 @Database(
   entities = [PromptFileEntity::class],
-  version = 1,
-  exportSchema = false // prevents Room schema export warnings in CI
+  version = 2, // Incremented to 2 to support new DevAI entity columns
+  exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
@@ -26,7 +26,9 @@ abstract class AppDatabase : RoomDatabase() {
           AppDatabase::class.java,
           "prompt_app.db"
         )
-          .fallbackToDestructiveMigration()
+          // Automatically wipes and recreates the DB when the schema changes.
+          // Ideal for rapid development of the DevAI Assistant features.
+          .fallbackToDestructiveMigration() 
           .build().also { INSTANCE = it }
       }
   }
