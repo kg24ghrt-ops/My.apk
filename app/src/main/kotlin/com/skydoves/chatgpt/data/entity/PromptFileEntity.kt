@@ -8,40 +8,49 @@ data class PromptFileEntity(
     @PrimaryKey(autoGenerate = true) 
     val id: Long = 0,
     
-    // Original fields
+    // --- Core Metadata ---
     val displayName: String,
     val filePath: String,
     val language: String? = null,
     val fileSizeBytes: Long = 0,
     val createdAt: Long = System.currentTimeMillis(),
     
-    // --- New DevAI Infrastructure ---
+    // --- AI Context Wrapper Fields ---
     
     /**
-     * Stores a short summary of the file or project content.
-     * Used for the "Context Management" feature.
+     * Stores the last successfully generated project tree.
+     * This allows the "Context Wrapper" to bundle the tree instantly.
+     */
+    val lastKnownTree: String? = null,
+
+    /**
+     * AI-generated or user-defined summary of the file's purpose.
      */
     val summary: String? = null,
 
     /**
-     * Comma-separated list of tags for filtering.
-     * Example: "Experimental, Kotlin, Core"
-     */
-    val tags: String? = null,
-
-    /**
-     * Project-specific ignore patterns for Tree Generation.
-     * Example: "temp/, logs/, *.tmp"
+     * User-defined patterns to exclude from tree generation (e.g., "node_modules, .git").
      */
     val customIgnorePatterns: String? = null,
 
     /**
-     * Allows soft-deletion/archiving to keep the workspace clean.
+     * Categorization tags (e.g., "Feature", "Bugfix", "Legacy").
      */
+    val tags: String? = null,
+
+    // --- UI State & Workflow Management ---
+    
+    val isFavorite: Boolean = false,
+    
     val isArchived: Boolean = false,
 
     /**
-     * Last time this file was used in a "Copy for AI" workflow.
+     * Updated every time this file is bundled for an AI prompt.
      */
-    val lastAccessedAt: Long = System.currentTimeMillis()
+    val lastAccessedAt: Long = System.currentTimeMillis(),
+
+    /**
+     * Quick-access extension for language-specific formatting in prompts.
+     */
+    val extension: String? = displayName.substringAfterLast('.', "")
 )

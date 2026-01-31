@@ -22,19 +22,22 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
 
   // ------------------- OBSERVABLE STATES -------------------
 
-  // List of imported files from Room DB
   val filesFlow = repo.allFilesFlow()
     .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-  // Currently displayed file content (Chunked Reading)
   private val _selectedFileContent = MutableStateFlow<String?>(null)
   val selectedFileContent: StateFlow<String?> = _selectedFileContent.asStateFlow()
 
-  // Currently generated project hierarchy (Project Tree)
   private val _activeProjectTree = MutableStateFlow<String?>(null)
   val activeProjectTree: StateFlow<String?> = _activeProjectTree.asStateFlow()
 
-  // Error reporting for UI
+  // New State for the AI Context Wrapper output
+  private val _aiContextBundle = MutableStateFlow<String?>(null)
+  val aiContextBundle: StateFlow<String?> = _aiContextBundle.asStateFlow()
+
+  private val _isProcessing = MutableStateFlow(false)
+  val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+
   private val _errorFlow = MutableStateFlow<String?>(null)
   val errorFlow: StateFlow<String?> = _errorFlow.asStateFlow()
 
@@ -61,19 +64,32 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
       try {
         repo.importUriAsFile(uri, displayName)
       } catch (e: Exception) {
-        reportError("Import URI", e)
+        reportError("Import URI", it)
       }
     }
   }
 
   /**
-   * Loads the first 64KB of a file into the preview flow.
-   * Implements: File Preview & Chunked Reading.
+   * The "AI Context Wrapper" trigger.
+   * Bundles tree, content, and metadata into one string for the user to copy.
    */
+  fun prepareAIContext(entity: PromptFileEntity) {
+    viewModelScope.launch(Dispatchers.IO) {
+      _isProcessing.value = true
+      try {
+        val bundle = repo.bundleContextForAI(entity)
+        _aiContextBundle.value = bundle
+      } catch (e: Exception) {
+        reportError("AI Bundle", e)
+      } finally {
+        _isProcessing.value = false
+      }
+    }
+  }
+
   fun loadFilePreview(entity: PromptFileEntity) {
     viewModelScope.launch(Dispatchers.IO) {
       try {
-        // Offset 0, Chunk size 64KB for safety
         val (content, _) = repo.readChunk(entity, 0L, 64 * 1024)
         _selectedFileContent.value = content
       } catch (e: Exception) {
@@ -82,18 +98,15 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     }
   }
 
-  /**
-   * Generates a text-based tree for the UI.
-   * Implements: Project Tree Generation.
-   */
   fun requestProjectTree(entity: PromptFileEntity) {
     viewModelScope.launch(Dispatchers.IO) {
-      _activeProjectTree.value = "⏳ Generating tree..."
+      _activeProjectTree.value = "⏳ Processing tree..."
       try {
+        // If the repository already has the tree cached in DB, this is now instant
         val tree = repo.generateProjectTreeFromZip(entity)
         _activeProjectTree.value = tree
       } catch (e: Exception) {
-        reportError("Generate project tree (${entity.displayName})", e)
+        reportError("Tree Gen", e)
         _activeProjectTree.value = "❌ Generation failed."
       }
     }
@@ -102,6 +115,7 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
   fun closePreview() {
     _selectedFileContent.value = null
     _activeProjectTree.value = null
+    _aiContextBundle.value = null
   }
 
   fun delete(entity: PromptFileEntity) {
@@ -109,25 +123,12 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
       try {
         repo.delete(entity)
       } catch (e: Exception) {
-        reportError("Delete file", e)
+        reportError("Delete", e)
       }
     }
   }
 
-  // Exposed as a suspend function if specific manual chunking is needed
+  // Support for legacy chunking if needed
   suspend fun readChunk(entity: PromptFileEntity, offset: Long, chunkSize: Int) =
-    try {
-      repo.readChunk(entity, offset, chunkSize)
-    } catch (e: Exception) {
-      reportError("Read chunk (${entity.displayName})", e)
-      "" to -1L
-    }
-
-  suspend fun generateProjectTree(entity: PromptFileEntity): String =
-    try {
-      repo.generateProjectTreeFromZip(entity)
-    } catch (e: Exception) {
-      reportError("Generate project tree (${entity.displayName})", e)
-      "❌ Failed to generate project tree."
-    }
+    repo.readChunk(entity, offset, chunkSize)
 }
