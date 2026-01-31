@@ -3,14 +3,15 @@ package com.skydoves.chatgpt.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -52,6 +53,11 @@ fun PromptAppScreen() {
             }
 
             TopHeader()
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // --- FIXED: ADDED MISSING TOGGLES ---
+            BundleConfigPanel(vm)
+            
             Spacer(modifier = Modifier.height(16.dp))
             M3ImportRow(vm)
             Spacer(modifier = Modifier.height(24.dp))
@@ -106,6 +112,57 @@ fun PromptAppScreen() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BundleConfigPanel(vm: PromptViewModel) {
+    val incTree by vm.includeTree.collectAsState()
+    val incPreview by vm.includePreview.collectAsState()
+    val incSummary by vm.includeSummary.collectAsState()
+    val incTask by vm.includeInstructions.collectAsState()
+
+    Column {
+        Text(
+            "Context Packaging Strategy",
+            style = MaterialTheme.typography.labelMedium,
+            color = Color(0xFF00E5FF)
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ConfigChip("Tree", incTree) { vm.toggleTree(it) }
+            ConfigChip("Preview", incPreview) { vm.togglePreview(it) }
+            ConfigChip("Summary", incSummary) { vm.toggleSummary(it) }
+            ConfigChip("Task", incTask) { vm.toggleInstructions(it) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConfigChip(label: String, selected: Boolean, onToggle: (Boolean) -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = { onToggle(!selected) },
+        label = { Text(label, fontSize = 11.sp) },
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = Color(0xFF161B22),
+            labelColor = Color.Gray,
+            selectedContainerColor = Color(0xFF00E5FF).copy(alpha = 0.2f),
+            selectedLabelColor = Color(0xFF00E5FF)
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            borderColor = Color(0xFF30363D),
+            selectedBorderColor = Color(0xFF00E5FF),
+            borderWidth = 1.dp,
+            selectedBorderWidth = 1.dp
+        )
+    )
+}
+
 @Composable
 private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
     OutlinedCard(
@@ -114,7 +171,7 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
             containerColor = Color(0xFF161B22),
             contentColor = Color.White
         ),
-        border = CardDefaults.outlinedCardBorder(enabled = true) 
+        border = CardDefaults.outlinedCardBorder(enabled = true)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -137,37 +194,46 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // --- FIXED: ROW WITH FIXED HEIGHT BUTTONS TO PREVENT SQUASHING ---
+            Row(
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 FilledTonalButton(
                     onClick = { vm.loadFilePreview(entity) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp)
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
                     Icon(Icons.Default.Visibility, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("View", fontSize = 11.sp)
+                    Text("View", fontSize = 10.sp)
                 }
                 FilledTonalButton(
                     onClick = { vm.requestProjectTree(entity) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp)
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
                     Icon(Icons.Default.AccountTree, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Tree", fontSize = 11.sp)
+                    Text("Tree", fontSize = 10.sp)
                 }
                 Button(
                     onClick = { vm.prepareAIContext(entity) },
-                    modifier = Modifier.weight(1.2f),
+                    modifier = Modifier.weight(1.2f).fillMaxHeight(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
                     Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Bundle", fontSize = 11.sp)
+                    Text("Bundle", fontSize = 10.sp)
                 }
                 IconButton(
                     onClick = { vm.delete(entity) },
+                    modifier = Modifier.size(48.dp),
                     colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFF21262D))
                 ) {
                     Icon(Icons.Default.DeleteOutline, null, tint = Color(0xFFF85149))
@@ -201,7 +267,7 @@ private fun M3PreviewPanel(title: String, content: String, onClose: () -> Unit, 
                 items(lines) { line ->
                     Text(
                         text = line,
-                        color = Color(0xFF79C0FF),
+                        color = if (line.contains("[Binary")) Color.Red else Color(0xFF79C0FF),
                         style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 18.sp)
                     )
                 }
@@ -271,7 +337,7 @@ private fun EmptyWorkspaceState() {
 private fun ErrorPanel(msg: String, onDismiss: () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3D1919))) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.ReportProblem, null, tint = Color(0xFFF85149)) // FIXED
+            Icon(Icons.Default.ReportProblem, null, tint = Color(0xFFF85149))
             Spacer(Modifier.width(12.dp))
             Text(msg, color = Color.White, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
             TextButton(onClick = onDismiss) { Text("Dismiss", color = Color(0xFFF85149)) }
