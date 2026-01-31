@@ -55,7 +55,6 @@ fun PromptAppScreen() {
             TopHeader()
             Spacer(modifier = Modifier.height(16.dp))
             
-            // --- FIXED: ADDED MISSING TOGGLES ---
             BundleConfigPanel(vm)
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -155,10 +154,10 @@ private fun ConfigChip(label: String, selected: Boolean, onToggle: (Boolean) -> 
             selectedLabelColor = Color(0xFF00E5FF)
         ),
         border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
             borderColor = Color(0xFF30363D),
-            selectedBorderColor = Color(0xFF00E5FF),
-            borderWidth = 1.dp,
-            selectedBorderWidth = 1.dp
+            selectedBorderColor = Color(0xFF00E5FF)
         )
     )
 }
@@ -171,6 +170,7 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
             containerColor = Color(0xFF161B22),
             contentColor = Color.White
         ),
+        // FIXED: Corrected parameter passing for Material 3 Card Border
         border = CardDefaults.outlinedCardBorder(enabled = true)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -194,7 +194,6 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // --- FIXED: ROW WITH FIXED HEIGHT BUTTONS TO PREVENT SQUASHING ---
             Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
