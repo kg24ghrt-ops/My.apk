@@ -11,9 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
 
@@ -42,12 +41,7 @@ fun PromptAppScreen() {
   val isProcessing by vm.isProcessing.collectAsState()
 
   Box(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
-    Column(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(12.dp)
-    ) {
-      // Error Reporting Panel
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
       errorMessage?.let {
         ErrorPanelMessage(it) { vm.clearError() }
         Spacer(modifier = Modifier.height(8.dp))
@@ -58,12 +52,11 @@ fun PromptAppScreen() {
       FileImportRow(vm)
       Spacer(modifier = Modifier.height(12.dp))
 
-      // Preview/Tree/Bundle Display Overlay
       if (bundledContent != null || activeTree != null || selectedContent != null) {
         val panelTitle = when {
-            bundledContent != null -> "AI Context Bundle"
+            bundledContent != null -> "AI Bundle (Cached)"
             activeTree != null -> "Project Tree"
-            else -> "File Preview"
+            else -> "Source Preview"
         }
         
         PreviewPanel(
@@ -74,26 +67,21 @@ fun PromptAppScreen() {
               val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
               val clip = ClipData.newPlainText("DevAI Export", text)
               clipboard.setPrimaryClip(clip)
-              Toast.makeText(ctx, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+              Toast.makeText(ctx, "Ready to Paste", Toast.LENGTH_SHORT).show()
           }
         )
       } else {
-        // Main Workspace
-        Text(
-          "Imported Workspace Files",
-          color = Color(0xFFEEEEEE),
-          style = MaterialTheme.typography.titleMedium
-        )
+        Text("Workspace Assets", color = Color(0xFFEEEEEE), style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(8.dp))
 
         if (files.isEmpty()) {
-          Text("No files imported. Add a ZIP or code file to begin.", color = Color(0xFFAAAAAA))
+          Text("Workspace is empty. Import a project to begin.", color = Color(0xFFAAAAAA))
         } else {
           LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxSize()
           ) {
-            items(files) { f ->
+            items(files, key = { it.id }) { f ->
               FileRow(f, vm)
             }
           }
@@ -101,13 +89,12 @@ fun PromptAppScreen() {
       }
     }
 
-    // Global Loading Spinner for heavy tasks
     if (isProcessing) {
       Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)),
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)),
         contentAlignment = Alignment.Center
       ) {
-        CircularProgressIndicator(color = Color(0xFF00BCD4))
+        CircularProgressIndicator(color = Color(0xFF00BCD4), strokeWidth = 4.dp)
       }
     }
   }
@@ -115,17 +102,11 @@ fun PromptAppScreen() {
 
 @Composable
 private fun PreviewPanel(title: String, content: String, onClose: () -> Unit, onCopy: (String) -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF1E1E1E))
-            .padding(12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    // OPTIMIZATION: Process lines once per content change
+    val lines = remember(content) { content.lines() }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E1E)).padding(12.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(title, color = Color(0xFF00BCD4), style = MaterialTheme.typography.titleMedium)
             Row {
                 Button(onClick = { onCopy(content) }) { Text("Copy") }
@@ -134,36 +115,39 @@ private fun PreviewPanel(title: String, content: String, onClose: () -> Unit, on
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
-        Box(
+        
+        // VIRTUALIZED LIST: Handles millions of characters smoothly
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF121212))
-                .verticalScroll(rememberScrollState())
+                .background(Color(0xFF0D0D0D))
                 .padding(8.dp)
         ) {
-            Text(
-                text = content, 
-                color = Color(0xFFAAFFAA), 
-                style = TextStyle(fontFamily = FontFamily.Monospace)
-            )
+            items(lines) { line ->
+                Text(
+                    text = line,
+                    color = Color(0xFF98C379), // Nice "Hacker Green"
+                    style = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel) {
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .background(Color(0xFF1E1E1E))
-      .padding(12.dp)
-  ) {
+  Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(12.dp)) {
     Text(entity.displayName, color = Color(0xFF00BCD4), style = MaterialTheme.typography.bodyLarge)
-    Text("${entity.fileSizeBytes} bytes", color = Color(0xFF888888), style = MaterialTheme.typography.bodySmall)
+    Text("${entity.fileSizeBytes / 1024} KB • ${entity.language ?: "text"}", color = Color(0xFF888888), style = MaterialTheme.typography.bodySmall)
     
     Spacer(modifier = Modifier.height(10.dp))
 
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
       Button(modifier = Modifier.weight(1f), onClick = { vm.loadFilePreview(entity) }) {
         Text("View", style = MaterialTheme.typography.labelSmall)
       }
@@ -174,7 +158,7 @@ private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel) {
         Text("Bundle", style = MaterialTheme.typography.labelSmall)
       }
       Button(modifier = Modifier.weight(0.8f), onClick = { vm.delete(entity) }) {
-        Text("Del", style = MaterialTheme.typography.labelSmall)
+        Text("Del", style = MaterialTheme.typography.labelSmall, color = Color.Red)
       }
     }
   }
@@ -192,12 +176,12 @@ private fun FileImportRow(vm: PromptViewModel) {
 
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
     Box(modifier = Modifier.weight(1f).background(Color(0xFF1E1E1E)).padding(10.dp)) {
-      if (displayName.isEmpty()) Text("Alias (Optional)", color = Color(0xFF555555))
+      if (displayName.isEmpty()) Text("Alias (Optional)", color = Color(0xFF555555), fontSize = 14.sp)
       BasicTextField(
         value = displayName,
         onValueChange = { displayName = it },
         singleLine = true,
-        textStyle = TextStyle(color = Color.White),
+        textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
         modifier = Modifier.fillMaxWidth()
       )
     }
@@ -207,19 +191,14 @@ private fun FileImportRow(vm: PromptViewModel) {
 
 @Composable
 private fun ErrorPanelMessage(errorText: String, onDismiss: () -> Unit) {
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .background(Color(0xFFB00020))
-      .padding(10.dp)
-  ) {
-    Text("System Alert", color = Color.White, style = MaterialTheme.typography.titleSmall)
-    Text(errorText, color = Color.White, style = MaterialTheme.typography.bodySmall, maxLines = 5)
-    Button(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Dismiss") }
+  Column(modifier = Modifier.fillMaxWidth().background(Color(0xFFB00020)).padding(10.dp)) {
+    Text("Engine Error", color = Color.White, style = MaterialTheme.typography.titleSmall)
+    Text(errorText, color = Color.White, style = MaterialTheme.typography.bodySmall, maxLines = 3)
+    Button(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Fix") }
   }
 }
 
 @Composable
 private fun TopBar() {
-  Text("DevAI Assistant", color = Color(0xFF00BCD4), style = MaterialTheme.typography.headlineSmall)
+  Text("DevAI Pro", color = Color(0xFF00BCD4), style = MaterialTheme.typography.headlineSmall)
 }

@@ -19,6 +19,9 @@ class PromptRepository(private val context: Context) {
   private val db = AppDatabase.getInstance(appContext)
   private val dao = db.promptFileDao()
 
+  // REUSABLE BUFFER: Prevents memory thrashing
+  private val sharedBuffer = ByteArray(8192)
+
   fun allFilesFlow() = dao.observeAll()
   suspend fun getById(id: Long) = dao.getById(id)
 
@@ -42,17 +45,14 @@ class PromptRepository(private val context: Context) {
   }
 
   // ------------------- AI CONTEXT WRAPPER -------------------
-
-  /**
-   * Bundles the project tree and file content into a professional AI Prompt.
-   */
   suspend fun bundleContextForAI(entity: PromptFileEntity): String = withContext(Dispatchers.IO) {
     dao.updateLastAccessed(entity.id)
     
     val tree = entity.lastKnownTree ?: generateProjectTreeFromZip(entity)
     val summary = entity.summary ?: "No summary provided."
 
-    buildString {
+    // Pre-allocate space for a large prompt to avoid memory re-allocations
+    StringBuilder(tree.length + 500).apply {
       append("### PROJECT CONTEXT WRAPPER\n")
       append("**File/Project Name:** ${entity.displayName}\n")
       append("**Summary:** $summary\n\n")
@@ -61,22 +61,23 @@ class PromptRepository(private val context: Context) {
       append(tree)
       append("\n```\n\n")
       append("#### TASK\n")
-      append("Please analyze the project structure above and provide insights or assist with the requested code changes.")
-    }
+      append("Please analyze the project structure above and provide insights.")
+    }.toString()
   }
 
-  // ------------------- PROJECT TREE GENERATOR -------------------
+  // ------------------- OPTIMIZED PROJECT TREE GENERATOR -------------------
   suspend fun generateProjectTreeFromZip(entity: PromptFileEntity): String = withContext(Dispatchers.IO) {
     val zipFile = File(entity.filePath)
-    if (!zipFile.exists()) return@withContext "ZIP file does not exist."
+    if (!zipFile.exists()) return@withContext "ZIP missing."
 
-    val MAX_TOTAL_CHARS = 100_000
-    val MAX_FILE_CHARS = 4_000
-    val treeBuilder = StringBuilder()
+    val MAX_TOTAL_CHARS = 120_000
+    val MAX_FILE_CHARS = 5_000
+    // Pre-allocate 64KB for the builder
+    val treeBuilder = StringBuilder(65536)
 
     try {
-      ZipInputStream(BufferedInputStream(zipFile.inputStream())).use { zip ->
-        val buffer = ByteArray(4096)
+      // Use 32KB buffer for the input stream to minimize disk seek overhead
+      ZipInputStream(BufferedInputStream(zipFile.inputStream(), 32768)).use { zip ->
         var entry: ZipEntry? = zip.nextEntry
         while (entry != null && treeBuilder.length < MAX_TOTAL_CHARS) {
           if (!entry.isDirectory && looksLikeTextOrCode(entry.name)) {
@@ -85,18 +86,23 @@ class PromptRepository(private val context: Context) {
             treeBuilder.append(indent).append("├─ ${entry.name.substringAfterLast('/')}\n")
             
             val contentIndent = "│   ".repeat(depth + 1)
-            var bytesReadTotal = 0
-            var bytesRead = zip.read(buffer)
-            while (bytesRead > 0 && bytesReadTotal < MAX_FILE_CHARS) {
-              val chunk = String(buffer, 0, bytesRead, Charsets.UTF_8)
-              chunk.forEach { 
-                treeBuilder.append(it)
-                if (it == '\n') treeBuilder.append(contentIndent)
+            var charsReadForFile = 0
+            
+            var bytesRead = zip.read(sharedBuffer)
+            while (bytesRead > 0 && charsReadForFile < MAX_FILE_CHARS) {
+              val chunk = String(sharedBuffer, 0, bytesRead, Charsets.UTF_8)
+              
+              // Optimized line-by-line indenting
+              chunk.split('\n').forEach { line ->
+                if (treeBuilder.length < MAX_TOTAL_CHARS) {
+                  treeBuilder.append(contentIndent).append(line).append("\n")
+                }
               }
-              bytesReadTotal += bytesRead
-              bytesRead = zip.read(buffer)
+
+              charsReadForFile += bytesRead
+              if (treeBuilder.length >= MAX_TOTAL_CHARS) break
+              bytesRead = zip.read(sharedBuffer)
             }
-            treeBuilder.append("\n")
           }
           zip.closeEntry()
           entry = zip.nextEntry
@@ -104,51 +110,59 @@ class PromptRepository(private val context: Context) {
       }
       
       val finalTree = treeBuilder.toString()
-      // PERSIST THE TREE so we don't have to re-zip next time
       dao.updateTree(entity.id, finalTree)
       return@withContext finalTree
       
     } catch (e: Exception) {
-      return@withContext "Error: ${e.message}"
+      return@withContext "Error reading tree: ${e.localizedMessage}"
     }
   }
 
-  // ------------------- HELPERS & CHUNKS -------------------
-  
-  suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {
-    dao.delete(entity)
-    File(entity.filePath).delete()
-  }
-
+  // ------------------- OPTIMIZED CHUNK READING -------------------
   suspend fun readChunk(entity: PromptFileEntity, offsetBytes: Long, chunkSizeBytes: Int): Pair<String, Long> =
     withContext(Dispatchers.IO) {
       val file = File(entity.filePath)
       if (!file.exists()) return@withContext "" to -1L
+      
       java.io.RandomAccessFile(file, "r").use { raf ->
+        if (offsetBytes >= raf.length()) return@withContext "" to -1L
+        
         raf.seek(offsetBytes)
-        val bytes = ByteArray(minOf(chunkSizeBytes, (raf.length() - offsetBytes).toInt()))
-        val read = raf.read(bytes)
-        val text = String(bytes, 0, read, Charsets.UTF_8)
+        val actualToRead = minOf(chunkSizeBytes, (raf.length() - offsetBytes).toInt())
+        val localBuffer = if (actualToRead <= sharedBuffer.size) sharedBuffer else ByteArray(actualToRead)
+        
+        val read = raf.read(localBuffer, 0, actualToRead)
+        val text = String(localBuffer, 0, read, Charsets.UTF_8)
+        
         val next = if (offsetBytes + read >= raf.length()) -1L else offsetBytes + read
         text to next
       }
     }
 
+  suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {
+    dao.delete(entity)
+    File(entity.filePath).delete()
+  }
+
   private fun queryFileName(uri: Uri): String? {
-    val cursor = appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-    return cursor?.use {
-      if (it.moveToFirst()) it.getString(it.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
-    }
+    return try {
+        appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(it.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
+        }
+    } catch (e: Exception) { null } ?: uri.lastPathSegment
   }
 
   private fun looksLikeTextOrCode(name: String): Boolean {
-    val ext = listOf(".kt", ".java", ".xml", ".json", ".md", ".txt", ".gradle", ".properties")
-    return ext.any { name.lowercase().endsWith(it) }
+    val lower = name.lowercase()
+    return listOf(".kt", ".java", ".xml", ".json", ".md", ".txt", ".gradle", ".properties", ".yml", ".yaml", ".js", ".ts", ".html", ".css").any { lower.endsWith(it) }
   }
 
   private fun guessLanguageFromName(name: String): String? = when {
     name.endsWith(".kt") -> "kotlin"
     name.endsWith(".java") -> "java"
+    name.endsWith(".xml") -> "xml"
+    name.endsWith(".json") -> "json"
+    name.endsWith(".md") -> "markdown"
     else -> null
   }
 }
