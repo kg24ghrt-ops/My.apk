@@ -31,7 +31,6 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
   private val _activeProjectTree = MutableStateFlow<String?>(null)
   val activeProjectTree: StateFlow<String?> = _activeProjectTree.asStateFlow()
 
-  // New State for the AI Context Wrapper output
   private val _aiContextBundle = MutableStateFlow<String?>(null)
   val aiContextBundle: StateFlow<String?> = _aiContextBundle.asStateFlow()
 
@@ -64,15 +63,11 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
       try {
         repo.importUriAsFile(uri, displayName)
       } catch (e: Exception) {
-        reportError("Import URI", it)
+        reportError("Import URI", e) // FIXED: Changed 'it' to 'e'
       }
     }
   }
 
-  /**
-   * The "AI Context Wrapper" trigger.
-   * Bundles tree, content, and metadata into one string for the user to copy.
-   */
   fun prepareAIContext(entity: PromptFileEntity) {
     viewModelScope.launch(Dispatchers.IO) {
       _isProcessing.value = true
@@ -102,7 +97,6 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     viewModelScope.launch(Dispatchers.IO) {
       _activeProjectTree.value = "⏳ Processing tree..."
       try {
-        // If the repository already has the tree cached in DB, this is now instant
         val tree = repo.generateProjectTreeFromZip(entity)
         _activeProjectTree.value = tree
       } catch (e: Exception) {
@@ -128,7 +122,6 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     }
   }
 
-  // Support for legacy chunking if needed
   suspend fun readChunk(entity: PromptFileEntity, offset: Long, chunkSize: Int) =
     repo.readChunk(entity, offset, chunkSize)
 }
