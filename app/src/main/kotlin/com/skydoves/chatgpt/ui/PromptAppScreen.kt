@@ -6,7 +6,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke // CRITICAL: Explicitly imported
+import androidx.compose.foundation.BorderStroke // CRITICAL IMPORT
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -197,6 +197,12 @@ private fun PresetChip(label: String, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConfigChip(label: String, selected: Boolean, onToggle: (Boolean) -> Unit) {
+    // FIX: Explicitly defining BorderStroke to avoid M3 1.2.0 ChipBorder mismatch
+    val borderStroke = BorderStroke(
+        width = 1.dp,
+        color = if (selected) Color(0xFF00E5FF) else Color(0xFF30363D)
+    )
+
     FilterChip(
         selected = selected,
         onClick = { onToggle(!selected) },
@@ -207,23 +213,21 @@ private fun ConfigChip(label: String, selected: Boolean, onToggle: (Boolean) -> 
             selectedContainerColor = Color(0xFF00E5FF).copy(alpha = 0.2f),
             selectedLabelColor = Color(0xFF00E5FF)
         ),
-        // FIX: Manual BorderStroke used to resolve ChipBorder type mismatch CI error
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (selected) Color(0xFF00E5FF) else Color(0xFF30363D)
-        )
+        border = borderStroke // Uses the explicitly typed variable
     )
 }
 
 @Composable
 private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
+    val cardBorder = BorderStroke(1.dp, Color(0xFF30363D))
+
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.outlinedCardColors(
             containerColor = Color(0xFF161B22),
             contentColor = Color.White
         ),
-        border = BorderStroke(1.dp, Color(0xFF30363D))
+        border = cardBorder
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
