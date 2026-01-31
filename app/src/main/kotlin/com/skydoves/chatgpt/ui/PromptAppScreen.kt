@@ -7,9 +7,9 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -42,7 +42,7 @@ fun PromptAppScreen() {
     val ctx = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
-    val files by vm.filesFlow.collectAsState()
+    val files by vm.filesFlow.collectAsState(initial = emptyList())
     val searchQuery by vm.searchQuery.collectAsState()
     val errorMessage by vm.errorFlow.collectAsState()
     val selectedContent by vm.selectedFileContent.collectAsState()
@@ -57,7 +57,6 @@ fun PromptAppScreen() {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Animated Error Panel
             AnimatedVisibility(
                 visible = errorMessage != null,
                 enter = expandVertically() + fadeIn(),
@@ -81,7 +80,6 @@ fun PromptAppScreen() {
             M3ImportRow(vm)
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Main Content Area with Crossfade for smooth switching
             Box(modifier = Modifier.weight(1f)) {
                 Crossfade(targetState = (bundledContent ?: activeTree ?: selectedContent), label = "view_switcher") { previewContent ->
                     if (previewContent != null) {
@@ -118,7 +116,6 @@ fun PromptAppScreen() {
                                     contentPadding = PaddingValues(bottom = 24.dp),
                                     modifier = Modifier.fillMaxSize()
                                 ) {
-                                    // High Performance Keying
                                     items(files, key = { it.id }) { f ->
                                         M3FileCard(f, vm)
                                     }
@@ -130,7 +127,6 @@ fun PromptAppScreen() {
             }
         }
 
-        // Full-screen processing overlay
         if (isProcessing) {
             Box(
                 modifier = Modifier
@@ -314,11 +310,13 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
 
 @Composable
 private fun M3PreviewPanel(title: String, content: String, onClose: () -> Unit, onCopy: (String) -> Unit) {
+    val panelShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D1117), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-            .border(1.dp, Color(0xFF30363D), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+            .background(Color(0xFF0D1117), panelShape)
+            // FIX: Moved border into Modifier where it belongs
+            .border(1.dp, Color(0xFF30363D), panelShape)
     ) {
         Row(
             modifier = Modifier
@@ -329,7 +327,7 @@ private fun M3PreviewPanel(title: String, content: String, onClose: () -> Unit, 
         ) {
             Column {
                 Text(title, color = Color(0xFF00E5FF), style = MaterialTheme.typography.labelLarge)
-                Text("Ready to paste into ChatGPT/Claude", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                Text("Ready to paste into AI tools", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
             }
             Row {
                 IconButton(onClick = { onCopy(content) }) { 
@@ -341,7 +339,7 @@ private fun M3PreviewPanel(title: String, content: String, onClose: () -> Unit, 
             }
         }
         
-        Divider(color = Color(0xFF30363D))
+        HorizontalDivider(color = Color(0xFF30363D))
         
         LazyColumn(modifier = Modifier.fillMaxSize().padding(12.dp)) {
             items(content.lines()) { line ->

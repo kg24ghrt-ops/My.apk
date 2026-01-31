@@ -10,34 +10,33 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
-import java.io.RandomAccessFile // CRITICAL: For readChunk
+import java.io.RandomAccessFile
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
-class PromptRepository(private val context: Context) {
+class PromptRepository(context: Context) {
 
     private val appContext = context.applicationContext
     private val db = AppDatabase.getInstance(appContext)
     private val dao = db.promptFileDao()
     
-    private val IO_BUFFER_SIZE = 16384 
-    private val IGNORED_PATHS = listOf("/node_modules/", "/.git/", "/build/", "/.gradle/", "/.idea/")
-    private val IGNORED_FILES = listOf("package-lock.json", "yarn.lock", ".DS_Store", "LICENSE")
+    private val IO_BUFFER_SIZE = 32768 
+    
+    // Using HashSets for O(1) lookup speed - much faster than List.any
+    private val IGNORED_PATHS = hashSetOf("node_modules", ".git", "build", ".gradle", ".idea")
+    private val IGNORED_FILES = hashSetOf("package-lock.json", "yarn.lock", ".DS_Store", "LICENSE")
+    private val EXT_WHITE_LIST = hashSetOf("kt", "java", "xml", "json", "md", "txt", "gradle", "js", "py", "c", "cpp", "h")
 
     fun allFilesFlow(): Flow<List<PromptFileEntity>> = dao.observeAll()
 
     fun searchFiles(query: String): Flow<List<PromptFileEntity>> = dao.searchFiles(query)
 
-    /**
-     * NEW: Fixed the Unresolved Reference error.
-     * Reads a specific chunk of a file without loading the whole thing into memory.
-     */
     suspend fun readChunk(entity: PromptFileEntity, offset: Long, size: Int): Pair<String, Long> = withContext(Dispatchers.IO) {
         val file = File(entity.filePath)
         if (!file.exists()) return@withContext "" to -1L
         
         val buffer = ByteArray(size)
-        try {
+        runCatching {
             RandomAccessFile(file, "r").use { raf ->
                 raf.seek(offset)
                 val read = raf.read(buffer)
@@ -47,9 +46,7 @@ class PromptRepository(private val context: Context) {
                 val nextOffset = if (offset + read >= raf.length()) -1L else offset + read
                 content to nextOffset
             }
-        } catch (e: Exception) {
-            "" to -1L
-        }
+        }.getOrDefault("" to -1L)
     }
 
     suspend fun bundleContextForAI(
@@ -63,42 +60,42 @@ class PromptRepository(private val context: Context) {
         
         val tree = if (includeTree) {
             entity.lastKnownTree ?: generateProjectTreeFromZip(entity, includePreview)
-        } else null
+        } else ""
 
-        val summary = if (includeSummary) (entity.summary ?: "DevAI Project Context") else null
-
-        StringBuilder().apply {
-            append("### DEV-AI CONTEXT: ${entity.displayName}\n")
-            if (includeSummary) append("#### SUMMARY\n$summary\n\n")
-            
-            if (includeTree && !tree.isNullOrBlank()) {
-                append("#### DIRECTORY & SOURCE STRUCTURE\n")
-                append("```text\n$tree\n```\n\n")
+        StringBuilder(tree.length + 1024).apply {
+            append("### DEV-AI CONTEXT: ").appendLine(entity.displayName)
+            if (includeSummary) {
+                append("#### SUMMARY\n").appendLine(entity.summary ?: "DevAI Project Context")
             }
-
+            if (includeTree && tree.isNotBlank()) {
+                append("#### DIRECTORY STRUCTURE\n```text\n").append(tree).appendLine("```")
+            }
             if (includeInstructions) {
-                append("#### TASK & INSTRUCTIONS\n")
-                append("Analyze the project logic and provide expert implementation advice.\n")
+                append("\n#### TASK\nAnalyze the logic and provide implementation advice.")
             }
         }.toString()
     }
 
     suspend fun importUriAsFile(uri: Uri, displayName: String?): Long = withContext(Dispatchers.IO) {
         val nameHint = displayName ?: queryFileName(uri) ?: "file_${System.currentTimeMillis()}"
-        val originalFile = File(appContext.filesDir, nameHint)
+        val destFile = File(appContext.filesDir, nameHint)
         
         appContext.contentResolver.openInputStream(uri)?.use { input ->
-            originalFile.outputStream().use { out -> input.copyTo(out) }
+            destFile.outputStream().use { out -> input.copyTo(out, 16384) }
         }
 
+        val ext = nameHint.substringAfterLast('.', "").lowercase()
         val entity = PromptFileEntity(
             displayName = nameHint,
-            filePath = originalFile.absolutePath,
-            language = if (nameHint.endsWith(".zip")) "zip" else "text",
-            fileSizeBytes = originalFile.length()
+            filePath = destFile.absolutePath,
+            extension = ext,
+            language = if (ext == "zip") "zip" else "text",
+            fileSizeBytes = destFile.length()
         )
 
-        val id = dao.insert(entity)
+        // FIX: Changed from .insert to .upsert to match the new DAO
+        val id = dao.upsert(entity)
+        
         val initialTree = generateProjectTreeFromZip(entity.copy(id = id), includeContent = true)
         dao.updateMetadataIndex(id, initialTree, "Initial project scan complete.")
         
@@ -112,57 +109,60 @@ class PromptRepository(private val context: Context) {
         val zipFile = File(entity.filePath)
         if (!zipFile.exists()) return@withContext "File missing."
 
-        val treeBuilder = StringBuilder(8192)
-        val buffer = ByteArray(IO_BUFFER_SIZE)
+        val treeBuilder = StringBuilder(16384)
+        val lineBuffer = ByteArray(2048)
 
-        try {
+        runCatching {
             ZipInputStream(BufferedInputStream(zipFile.inputStream(), IO_BUFFER_SIZE)).use { zip ->
                 var entry: ZipEntry? = zip.nextEntry
                 while (entry != null) {
-                    if (shouldIgnore(entry.name)) {
-                        zip.closeEntry()
+                    val path = entry.name
+                    if (shouldIgnore(path)) {
                         entry = zip.nextEntry
                         continue
                     }
 
-                    val depth = entry.name.count { it == '/' }
-                    val indent = "  ".repeat(depth)
-                    val fileName = entry.name.substringAfterLast('/')
+                    var depth = 0
+                    for (char in path) if (char == '/') depth++
+                    if (path.endsWith('/')) depth--
+
+                    repeat(depth) { treeBuilder.append("  ") }
                     
+                    val fileName = path.substringAfterLast('/', path).removeSuffix("/")
                     if (entry.isDirectory) {
-                        treeBuilder.append("$indent📁 $fileName/\n")
+                        treeBuilder.append("📁 ").appendLine(fileName)
                     } else {
-                        treeBuilder.append("$indent📄 $fileName\n")
+                        treeBuilder.append("📄 ").appendLine(fileName)
                         
-                        if (includeContent && looksLikeTextOrCode(entry.name)) {
-                            val contentIndent = "$indent    "
-                            val bytesRead = zip.read(buffer)
-                            if (bytesRead > 0) {
-                                val chunk = String(buffer, 0, bytesRead, Charsets.UTF_8)
-                                chunk.lineSequence().take(8).forEach { line ->
-                                    if (line.isNotBlank()) treeBuilder.append("$contentIndent$line\n")
+                        if (includeContent && looksLikeTextOrCode(fileName)) {
+                            val indent = "  ".repeat(depth + 2)
+                            val read = zip.read(lineBuffer)
+                            if (read > 0) {
+                                val chunk = String(lineBuffer, 0, read, Charsets.UTF_8)
+                                chunk.lineSequence().take(5).forEach { line ->
+                                    if (line.isNotBlank()) {
+                                        treeBuilder.append(indent).appendLine(line.trim())
+                                    }
                                 }
                             }
                         }
                     }
-                    zip.closeEntry()
                     entry = zip.nextEntry
                 }
             }
             val result = treeBuilder.toString()
             dao.updateTree(entity.id, result)
-            return@withContext result
-        } catch (e: Exception) {
-            return@withContext "Indexing error: ${e.localizedMessage}"
-        }
+            result
+        }.getOrElse { "Scan failed: ${it.localizedMessage}" }
     }
 
-    private fun shouldIgnore(path: String) = 
-        IGNORED_PATHS.any { path.contains(it) } || IGNORED_FILES.any { path.endsWith(it) }
+    private fun shouldIgnore(path: String): Boolean {
+        val segments = path.split('/')
+        return segments.any { it in IGNORED_PATHS } || IGNORED_FILES.any { path.endsWith(it) }
+    }
 
     private fun looksLikeTextOrCode(name: String): Boolean {
-        val ext = listOf(".kt", ".java", ".xml", ".json", ".md", ".txt", ".gradle", ".js", ".py")
-        return ext.any { name.lowercase().endsWith(it) }
+        return name.substringAfterLast('.', "").lowercase() in EXT_WHITE_LIST
     }
 
     suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {
@@ -171,10 +171,10 @@ class PromptRepository(private val context: Context) {
     }
 
     private fun queryFileName(uri: Uri): String? {
-        return try {
+        return runCatching {
             appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                if (it.moveToFirst()) it.getString(it.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
+                if (it.moveToFirst()) it.getString(0) else null
             }
-        } catch (e: Exception) { null }
+        }.getOrNull()
     }
 }
