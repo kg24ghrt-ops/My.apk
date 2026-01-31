@@ -6,6 +6,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -56,12 +57,10 @@ fun PromptAppScreen() {
             TopHeader()
             Spacer(modifier = Modifier.height(16.dp))
             
-            // OPTIMIZATION: Instant Search Bar
             M3SearchBar(searchQuery) { vm.updateSearchQuery(it) }
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            // OPTIMIZATION: Presets + Config
             BundleConfigPanel(vm)
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -225,7 +224,8 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
             containerColor = Color(0xFF161B22),
             contentColor = Color.White
         ),
-        border = CardDefaults.outlinedCardBorder(enabled = true)
+        // FIX: Replaced CardDefaults.outlinedCardBorder() with BorderStroke to prevent CI compilation errors
+        border = BorderStroke(1.dp, Color(0xFF30363D))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
