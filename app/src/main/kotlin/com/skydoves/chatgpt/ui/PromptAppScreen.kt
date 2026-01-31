@@ -123,7 +123,7 @@ private fun M3SearchBar(query: String, onQueryChange: (String) -> Unit) {
         value = query,
         onValueChange = onQueryChange,
         modifier = Modifier.fillMaxWidth(),
-        placeholder = { Text("Search files or languages...", color = Color.Gray, fontSize = 14.sp) },
+        placeholder = { Text("Search files...", color = Color.Gray, fontSize = 14.sp) },
         leadingIcon = { Icon(Icons.Default.Search, null, tint = Color(0xFF00E5FF)) },
         trailingIcon = {
             if (query.isNotEmpty()) {
@@ -190,7 +190,7 @@ private fun PresetChip(label: String, onClick: () -> Unit) {
             containerColor = Color(0xFF21262D),
             labelColor = Color.White
         ),
-        border = AssistChipDefaults.assistChipBorder(borderColor = Color(0xFF30363D))
+        border = AssistChipDefaults.assistChipBorder(enabled = true, borderColor = Color(0xFF30363D))
     )
 }
 
@@ -207,7 +207,6 @@ private fun ConfigChip(label: String, selected: Boolean, onToggle: (Boolean) -> 
             selectedContainerColor = Color(0xFF00E5FF).copy(alpha = 0.2f),
             selectedLabelColor = Color(0xFF00E5FF)
         ),
-        // Now stable in M3 1.3.1
         border = FilterChipDefaults.filterChipBorder(
             enabled = true,
             selected = selected,
@@ -258,8 +257,7 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
                 FilledTonalButton(
                     onClick = { vm.loadFilePreview(entity) },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp)
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Icon(Icons.Default.Visibility, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
@@ -268,8 +266,7 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
                 FilledTonalButton(
                     onClick = { vm.requestProjectTree(entity) },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp)
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Icon(Icons.Default.AccountTree, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
@@ -279,8 +276,7 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
                     onClick = { vm.prepareAIContext(entity) },
                     modifier = Modifier.weight(1.2f).fillMaxHeight(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp)
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
