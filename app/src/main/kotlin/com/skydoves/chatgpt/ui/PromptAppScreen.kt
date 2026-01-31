@@ -114,7 +114,6 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
             containerColor = Color(0xFF161B22),
             contentColor = Color.White
         ),
-        // FIXED: Removed .copy(brush = null) to prevent compilation error
         border = CardDefaults.outlinedCardBorder(enabled = true) 
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -272,7 +271,7 @@ private fun EmptyWorkspaceState() {
 private fun ErrorPanel(msg: String, onDismiss: () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3D1919))) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.ReportProblem, null, tint = Color(0xFFReportProblem))
+            Icon(Icons.Default.ReportProblem, null, tint = Color(0xFFF85149)) // FIXED
             Spacer(Modifier.width(12.dp))
             Text(msg, color = Color.White, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
             TextButton(onClick = onDismiss) { Text("Dismiss", color = Color(0xFFF85149)) }
