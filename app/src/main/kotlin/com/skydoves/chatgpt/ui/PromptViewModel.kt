@@ -22,6 +22,7 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     private val repo = PromptRepository(application.applicationContext)
     private val bundleCache = LruCache<Long, String>(10)
 
+    // --- PACKAGING STRATEGY STATES ---
     private val _includeTree = MutableStateFlow(true)
     val includeTree = _includeTree.asStateFlow()
 
@@ -34,11 +35,13 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     private val _includeInstructions = MutableStateFlow(true)
     val includeInstructions = _includeInstructions.asStateFlow()
 
+    // --- TOGGLE ACTIONS ---
     fun toggleTree(value: Boolean) { _includeTree.value = value }
     fun togglePreview(value: Boolean) { _includePreview.value = value }
     fun toggleSummary(value: Boolean) { _includeSummary.value = value }
     fun toggleInstructions(value: Boolean) { _includeInstructions.value = value }
 
+    // --- WORKSPACE STATES ---
     val filesFlow = repo.allFilesFlow()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -60,11 +63,12 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     private fun reportError(tag: String, throwable: Throwable) {
         val sw = StringWriter()
         throwable.printStackTrace(PrintWriter(sw))
-        _errorFlow.value = "❌ $tag: ${throwable.message}"
+        _errorFlow.value = "❌ $tag Error: ${throwable.localizedMessage ?: "Unknown failure"}"
     }
 
     fun clearError() { _errorFlow.value = null }
 
+    // --- ACTIONS ---
     fun importUri(uri: Uri, displayName: String?) {
         viewModelScope.launch(Dispatchers.IO) {
             try { repo.importUriAsFile(uri, displayName) } 
@@ -72,11 +76,15 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** * Wired to the "Bundle" button. 
+     * Uses the currently toggled states to build a custom AI prompt.
+     */
     fun prepareAIContext(entity: PromptFileEntity) {
         if (_isProcessing.value) return 
         viewModelScope.launch(Dispatchers.IO) {
             _isProcessing.value = true
             try {
+                // PASSING ALL UI TOGGLES TO REPOSITORY
                 val bundle = repo.bundleContextForAI(
                     entity = entity,
                     includeTree = _includeTree.value,
@@ -86,7 +94,7 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 _aiContextBundle.value = bundle
             } catch (e: Exception) {
-                reportError("Context", e)
+                reportError("Context Bundling", e)
             } finally {
                 _isProcessing.value = false
             }
@@ -98,7 +106,7 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val (content, _) = repo.readChunk(entity, 0L, 32 * 1024)
                 _selectedFileContent.value = if (isBinaryContent(content)) {
-                    "[Binary Content - Preview Disabled]"
+                    "[Binary File Detected - Preview Disabled for Safety]"
                 } else content
             } catch (e: Exception) { reportError("Preview", e) }
         }
@@ -106,15 +114,17 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun isBinaryContent(text: String): Boolean {
         if (text.isEmpty()) return false
-        return text.count { it == '\u0000' } > 0 || text.take(100).any { it.code < 32 && it != '\n' && it != '\r' && it != '\t' }
+        // Check for null characters or excessive control codes
+        return text.count { it == '\u0000' } > 0 || 
+               text.take(100).any { it.code < 32 && it != '\n' && it != '\r' && it != '\t' }
     }
 
     fun requestProjectTree(entity: PromptFileEntity) {
         viewModelScope.launch(Dispatchers.IO) {
-            _activeProjectTree.value = "⏳ Loading..."
+            _activeProjectTree.value = "⏳ Generating File Tree..."
             try {
                 _activeProjectTree.value = repo.generateProjectTreeFromZip(entity)
-            } catch (e: Exception) { reportError("Tree", e) }
+            } catch (e: Exception) { reportError("Tree Generation", e) }
         }
     }
 
