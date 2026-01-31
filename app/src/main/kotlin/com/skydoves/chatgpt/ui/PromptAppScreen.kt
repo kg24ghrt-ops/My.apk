@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,18 +27,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
-import kotlinx.coroutines.launch
-
-private const val CHUNK_BYTES = 32 * 1024
-private const val MAX_DISPLAY_TREE_CHARS = 120_000 // cap characters shown in UI
 
 @Composable
 fun PromptAppScreen() {
   val vm: PromptViewModel = viewModel()
   val ctx = LocalContext.current
-  // Using collectAsState (StateFlow -> Compose state)
-  val files by vm.filesFlow.collectAsState(initial = emptyList())
-  val errorMessage by vm.errorFlow.collectAsState(initial = null)
+  
+  // State collection from ViewModel flows
+  val files by vm.filesFlow.collectAsState()
+  val errorMessage by vm.errorFlow.collectAsState()
+  val selectedContent by vm.selectedFileContent.collectAsState()
+  val activeTree by vm.activeProjectTree.collectAsState()
 
   Column(
     modifier = Modifier
@@ -45,7 +45,7 @@ fun PromptAppScreen() {
       .background(Color(0xFF121212))
       .padding(12.dp)
   ) {
-    // error message panel (no crash)
+    // Error Reporting Panel
     errorMessage?.let {
       ErrorPanelMessage(it) { vm.clearError() }
       Spacer(modifier = Modifier.height(8.dp))
@@ -56,23 +56,38 @@ fun PromptAppScreen() {
     FileImportRow(vm)
     Spacer(modifier = Modifier.height(12.dp))
 
-    Text(
-      "Imported Files",
-      color = Color(0xFFEEEEEE),
-      style = MaterialTheme.typography.titleMedium
-    )
-
-    Spacer(modifier = Modifier.height(8.dp))
-
-    if (files.isEmpty()) {
-      Text("No files yet", color = Color(0xFFAAAAAA))
+    // Preview/Tree Display Overlay
+    if (selectedContent != null || activeTree != null) {
+      PreviewPanel(
+        title = if (activeTree != null) "Project Tree" else "File Preview",
+        content = activeTree ?: selectedContent ?: "",
+        onClose = { vm.closePreview() },
+        onCopy = { text ->
+            val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("DevAI Export", text)
+            clipboard.setPrimaryClip(clip)
+            Toast.makeText(ctx, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+        }
+      )
     } else {
-      LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxSize()
-      ) {
-        items(files) { f ->
-          FileRow(f, vm, ctx)
+      // Main Workspace: File List
+      Text(
+        "Imported Workspace Files",
+        color = Color(0xFFEEEEEE),
+        style = MaterialTheme.typography.titleMedium
+      )
+      Spacer(modifier = Modifier.height(8.dp))
+
+      if (files.isEmpty()) {
+        Text("No files imported yet. Start by importing a project folder or file.", color = Color(0xFFAAAAAA))
+      } else {
+        LazyColumn(
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.fillMaxSize()
+        ) {
+          items(files) { f ->
+            FileRow(f, vm)
+          }
         }
       }
     }
@@ -80,26 +95,62 @@ fun PromptAppScreen() {
 }
 
 @Composable
-private fun ErrorPanelMessage(errorText: String, onDismiss: () -> Unit) {
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .background(Color(0xFFB00020))
-      .padding(10.dp)
-  ) {
-    val firstLine = errorText.lineSequence().firstOrNull() ?: "Error"
-    Text(firstLine, color = Color.White, style = MaterialTheme.typography.titleMedium)
-    Spacer(modifier = Modifier.height(4.dp))
-    Text(errorText, color = Color.White, style = MaterialTheme.typography.bodySmall)
-    Spacer(modifier = Modifier.height(8.dp))
-    Button(onClick = onDismiss) { Text("Dismiss") }
-  }
+private fun PreviewPanel(title: String, content: String, onClose: () -> Unit, onCopy: (String) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1E1E1E))
+            .padding(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, color = Color(0xFF00BCD4), style = MaterialTheme.typography.titleMedium)
+            Row {
+                Button(onClick = { onCopy(content) }) { Text("Copy") }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(onClick = onClose) { Text("Close") }
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF121212))
+                .verticalScroll(rememberScrollState())
+                .padding(8.dp)
+        ) {
+            Text(content, color = Color(0xFFAAFFAA), style = TextStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
+        }
+    }
 }
 
 @Composable
-private fun TopBar() {
-  Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-    Text("Prompt Assistant", color = Color(0xFF00BCD4), style = MaterialTheme.typography.titleLarge)
+private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .background(Color(0xFF1E1E1E))
+      .padding(12.dp)
+  ) {
+    Text(entity.displayName, color = Color(0xFF00BCD4), style = MaterialTheme.typography.bodyLarge)
+    Text("${entity.fileSizeBytes} bytes", color = Color(0xFF888888), style = MaterialTheme.typography.bodySmall)
+    
+    Spacer(modifier = Modifier.height(10.dp))
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      Button(modifier = Modifier.weight(1f), onClick = { vm.loadFilePreview(entity) }) {
+        Text("Preview")
+      }
+      Button(modifier = Modifier.weight(1f), onClick = { vm.requestProjectTree(entity) }) {
+        Text("Tree")
+      }
+      Button(modifier = Modifier.weight(0.7f), onClick = { vm.delete(entity) }) {
+        Text("Delete")
+      }
+    }
   }
 }
 
@@ -114,8 +165,8 @@ private fun FileImportRow(vm: PromptViewModel) {
   }
 
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-    Box(modifier = Modifier.weight(1f).background(Color(0xFF1E1E1E)).padding(8.dp)) {
-      if (displayName.isEmpty()) Text("Optional display name", color = Color(0xFF888888))
+    Box(modifier = Modifier.weight(1f).background(Color(0xFF1E1E1E)).padding(10.dp)) {
+      if (displayName.isEmpty()) Text("Alias (Optional)", color = Color(0xFF555555))
       BasicTextField(
         value = displayName,
         onValueChange = { displayName = it },
@@ -129,109 +180,20 @@ private fun FileImportRow(vm: PromptViewModel) {
 }
 
 @Composable
-private fun FileRow(entity: PromptFileEntity, vm: PromptViewModel, ctx: Context) {
-  val coroutine = rememberCoroutineScope()
-  val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-
-  var preview by remember { mutableStateOf("") }
-  var nextOffset by remember { mutableStateOf(0L) }
-  var expanded by remember { mutableStateOf(false) }
-
-  // project tree states: truncated shown in UI, full stored for clipboard/sharing
-  var projectTree by remember { mutableStateOf("") }      // truncated for UI
-  var fullProjectTree by remember { mutableStateOf("") }  // full text for copy/share
-  var showTree by remember { mutableStateOf(false) }
-  var treeLoading by remember { mutableStateOf(false) }
-
-  Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(10.dp)) {
-    Text("Name: ${entity.displayName}", color = Color(0xFF00BCD4))
-    Text("Size: ${entity.fileSizeBytes} bytes", color = Color(0xFFEEEEEE))
-    Spacer(modifier = Modifier.height(6.dp))
-
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      Button(onClick = {
-        coroutine.launch {
-          try {
-            val (text, nxt) = vm.readChunk(entity, 0L, CHUNK_BYTES)
-            preview = text
-            nextOffset = nxt
-            expanded = true
-          } catch (e: Exception) {
-            // ViewModel reports error; keep UI stable
-            preview = "Failed to load preview."
-          }
-        }
-      }) { Text("View") }
-
-      Button(onClick = {
-        if (!treeLoading) {
-          treeLoading = true
-          showTree = false
-          coroutine.launch {
-            try {
-              val full = vm.generateProjectTree(entity)
-              fullProjectTree = full
-              projectTree = if (full.length > MAX_DISPLAY_TREE_CHARS) {
-                full.take(MAX_DISPLAY_TREE_CHARS) + "\n\n[truncated display]"
-              } else full
-              showTree = true
-            } catch (e: Exception) {
-              // ViewModel should already report the error to errorFlow; fallback message
-              projectTree = "Failed to generate project tree."
-              fullProjectTree = ""
-              showTree = true
-            } finally {
-              treeLoading = false
-            }
-          }
-        }
-      }) {
-        Text(if (treeLoading) "Generating..." else "Project Tree")
-      }
-
-      Button(onClick = {
-        if (fullProjectTree.isNotEmpty()) {
-          val clip = ClipData.newPlainText("Project Tree - ${entity.displayName}", fullProjectTree)
-          clipboard.setPrimaryClip(clip)
-          Toast.makeText(ctx, "Project tree copied", Toast.LENGTH_SHORT).show()
-        } else {
-          Toast.makeText(ctx, "No project tree to copy", Toast.LENGTH_SHORT).show()
-        }
-      }) {
-        Text("Copy Tree")
-      }
-
-      Button(onClick = { vm.delete(entity) }) { Text("Delete") }
-    }
-
-    if (expanded) {
-      Spacer(modifier = Modifier.height(8.dp))
-      Column(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 400.dp).verticalScroll(rememberScrollState())) {
-        Text(preview, color = Color(0xFFDDDDDD))
-        if (nextOffset > 0) {
-          Spacer(modifier = Modifier.height(8.dp))
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {
-              coroutine.launch {
-                try {
-                  val (text, nxt) = vm.readChunk(entity, nextOffset, CHUNK_BYTES)
-                  preview += "\n" + text
-                  nextOffset = nxt
-                } catch (_: Exception) {
-                  // ignore, UI stable
-                }
-              }
-            }) { Text("Load more") }
-          }
-        }
-      }
-    }
-
-    if (showTree && projectTree.isNotEmpty()) {
-      Spacer(modifier = Modifier.height(8.dp))
-      Column(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 400.dp).verticalScroll(rememberScrollState()).background(Color(0xFF2E2E2E)).padding(8.dp)) {
-        Text(projectTree, color = Color(0xFFAAFFAA))
-      }
-    }
+private fun ErrorPanelMessage(errorText: String, onDismiss: () -> Unit) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .background(Color(0xFFB00020))
+      .padding(10.dp)
+  ) {
+    Text("Runtime Error", color = Color.White, style = MaterialTheme.typography.titleSmall)
+    Text(errorText, color = Color.White, style = MaterialTheme.typography.bodySmall, maxLines = 5)
+    Button(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Dismiss") }
   }
+}
+
+@Composable
+private fun TopBar() {
+  Text("DevAI Assistant", color = Color(0xFF00BCD4), style = MaterialTheme.typography.headlineSmall)
 }
