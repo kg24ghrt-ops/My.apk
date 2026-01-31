@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
+import java.io.RandomAccessFile // CRITICAL: For readChunk
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
@@ -19,27 +20,38 @@ class PromptRepository(private val context: Context) {
     private val db = AppDatabase.getInstance(appContext)
     private val dao = db.promptFileDao()
     
-    // Performance: Using a consistent buffer size for IO operations
     private val IO_BUFFER_SIZE = 16384 
-
     private val IGNORED_PATHS = listOf("/node_modules/", "/.git/", "/build/", "/.gradle/", "/.idea/")
     private val IGNORED_FILES = listOf("package-lock.json", "yarn.lock", ".DS_Store", "LICENSE")
 
-    /**
-     * Observes all non-archived files.
-     */
     fun allFilesFlow(): Flow<List<PromptFileEntity>> = dao.observeAll()
 
-    /**
-     * FIX: Added for search functionality in PromptViewModel.
-     * Uses the optimized Room query for displayName and language.
-     */
     fun searchFiles(query: String): Flow<List<PromptFileEntity>> = dao.searchFiles(query)
 
     /**
-     * Bundles project context into a single string for AI ingestion.
-     * Uses cached data where possible to minimize disk IO.
+     * NEW: Fixed the Unresolved Reference error.
+     * Reads a specific chunk of a file without loading the whole thing into memory.
      */
+    suspend fun readChunk(entity: PromptFileEntity, offset: Long, size: Int): Pair<String, Long> = withContext(Dispatchers.IO) {
+        val file = File(entity.filePath)
+        if (!file.exists()) return@withContext "" to -1L
+        
+        val buffer = ByteArray(size)
+        try {
+            RandomAccessFile(file, "r").use { raf ->
+                raf.seek(offset)
+                val read = raf.read(buffer)
+                if (read == -1) return@withContext "" to -1L
+                
+                val content = String(buffer, 0, read, Charsets.UTF_8)
+                val nextOffset = if (offset + read >= raf.length()) -1L else offset + read
+                content to nextOffset
+            }
+        } catch (e: Exception) {
+            "" to -1L
+        }
+    }
+
     suspend fun bundleContextForAI(
         entity: PromptFileEntity,
         includeTree: Boolean,
@@ -71,9 +83,6 @@ class PromptRepository(private val context: Context) {
         }.toString()
     }
 
-    /**
-     * Imports a file from a Uri, saves it to internal storage, and pre-indexes it.
-     */
     suspend fun importUriAsFile(uri: Uri, displayName: String?): Long = withContext(Dispatchers.IO) {
         val nameHint = displayName ?: queryFileName(uri) ?: "file_${System.currentTimeMillis()}"
         val originalFile = File(appContext.filesDir, nameHint)
@@ -90,17 +99,12 @@ class PromptRepository(private val context: Context) {
         )
 
         val id = dao.insert(entity)
-        
-        // Immediate Indexing: Ensures "Bundle" and "Tree" buttons work instantly
         val initialTree = generateProjectTreeFromZip(entity.copy(id = id), includeContent = true)
         dao.updateMetadataIndex(id, initialTree, "Initial project scan complete.")
         
         return@withContext id
     }
 
-    /**
-     * Scans ZIP files to generate a visual directory tree.
-     */
     suspend fun generateProjectTreeFromZip(
         entity: PromptFileEntity, 
         includeContent: Boolean

@@ -37,11 +37,10 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     private val _includeInstructions = MutableStateFlow(true)
     val includeInstructions = _includeInstructions.asStateFlow()
 
-    // --- WORKSPACE FLOW (NOW DEBOUNCED & OPTIMIZED) ---
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val filesFlow = _searchQuery
-        .debounce(300L) // NEW: Wait 300ms for user to stop typing
-        .distinctUntilChanged() // NEW: Don't search if the query didn't actually change
+        .debounce(300L) 
+        .distinctUntilChanged() 
         .flatMapLatest { query ->
             if (query.isBlank()) repo.allFilesFlow()
             else repo.searchFiles(query) 
@@ -49,7 +48,7 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
         .flowOn(Dispatchers.IO)
         .stateIn(
             scope = viewModelScope, 
-            started = SharingStarted.WhileSubscribed(5000), // NEW: Memory-safe shutdown
+            started = SharingStarted.WhileSubscribed(5000), 
             initialValue = emptyList()
         )
 
@@ -68,7 +67,6 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     private val _errorFlow = MutableStateFlow<String?>(null)
     val errorFlow = _errorFlow.asStateFlow()
 
-    // --- ACTIONS ---
     fun updateSearchQuery(query: String) { _searchQuery.value = query }
 
     fun toggleTree(value: Boolean) { _includeTree.value = value }
@@ -114,6 +112,7 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     fun loadFilePreview(entity: PromptFileEntity) {
         viewModelScope.launch {
             try {
+                // This call requires the readChunk function to exist in PromptRepository
                 val (content, _) = repo.readChunk(entity, 0L, 32768)
                 _selectedFileContent.value = if (isBinaryContent(content)) {
                     "📂 [Binary/Large File] Preview hidden for stability."
@@ -133,7 +132,6 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun isBinaryContent(text: String): Boolean {
         if (text.isEmpty()) return false
-        // Optimized check: scan only common control characters
         return text.take(200).any { it.code < 32 && it != '\n' && it != '\r' && it != '\t' }
     }
 
