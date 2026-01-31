@@ -15,31 +15,32 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4 # Updated to v4
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4 # Updated to v4
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # BETTER CACHING: This official action handles the nitty-gritty of Android KSP/Compose caching
+      # Specialized Gradle setup for optimized caching
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: wrapper
-          # This ensures we don't reuse the broken 1.2.0 build cache
-          cache-overwrite-existing: true 
+          cache-overwrite-existing: true
 
       - name: Make Gradle Wrapper executable
         run: chmod +x ./gradlew
 
-      # FORCE CLEAN: We add 'clean' to ensure the ChipBorder error is purged from KSP
+      # Removed 'clean' and '--no-daemon' to allow faster, standard incremental builds
       - name: Build Debug APK
-        run: ./gradlew clean assembleDebug --no-build-cache
+        run: ./gradlew assembleDebug
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk-${{ github.run_number }}
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
