@@ -41,7 +41,6 @@ fun PromptAppScreen() {
     val bundledContent by vm.aiContextBundle.collectAsState()
     val isProcessing by vm.isProcessing.collectAsState()
 
-    // M3 Surface provides the correct base layer for tonal elevation
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = Color(0xFF0B0E14)
@@ -109,14 +108,14 @@ fun PromptAppScreen() {
 
 @Composable
 private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
-    // M3 OutlinedCard for modern workspace feel
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.outlinedCardColors(
             containerColor = Color(0xFF161B22),
             contentColor = Color.White
         ),
-        border = CardDefaults.outlinedCardBorder().copy(brush = null)
+        // FIXED: Removed .copy(brush = null) to prevent compilation error
+        border = CardDefaults.outlinedCardBorder(enabled = true) 
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -139,7 +138,6 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // M3 Button group with consistent height
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(
                     onClick = { vm.loadFilePreview(entity) },
@@ -184,7 +182,6 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
 private fun M3PreviewPanel(title: String, content: String, onClose: () -> Unit, onCopy: (String) -> Unit) {
     val lines = remember(content) { content.lines() }
     
-    // M3 ElevatedCard for the modal-like preview
     ElevatedCard(
         modifier = Modifier.fillMaxSize(),
         colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF0D1117))
@@ -275,7 +272,7 @@ private fun EmptyWorkspaceState() {
 private fun ErrorPanel(msg: String, onDismiss: () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3D1919))) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.ReportProblem, null, tint = Color(0xFFF85149))
+            Icon(Icons.Default.ReportProblem, null, tint = Color(0xFFReportProblem))
             Spacer(Modifier.width(12.dp))
             Text(msg, color = Color.White, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
             TextButton(onClick = onDismiss) { Text("Dismiss", color = Color(0xFFF85149)) }
