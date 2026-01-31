@@ -1,11 +1,6 @@
 package com.skydoves.chatgpt.data.dao
 
-import androidx.room.Dao
-import androidx.room.Delete
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.Query
-import androidx.room.Update
+import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
 
@@ -21,18 +16,16 @@ interface PromptFileDao {
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun insert(entity: PromptFileEntity): Long
 
-  /**
-   * Updates existing file metadata (Summary, Tree, Tags).
-   * Essential for the AI Context Wrapper workflow.
-   */
-  @Update
-  suspend fun update(entity: PromptFileEntity)
-
-  @Query("UPDATE prompt_files SET lastKnownTree = :tree WHERE id = :id")
-  suspend fun updateTree(id: Long, tree: String)
+  // OPTIMIZATION: Update specific metadata fields without rewriting the whole object
+  @Query("UPDATE prompt_files SET lastKnownTree = :tree, summary = :metadataIndex WHERE id = :id")
+  suspend fun updateMetadataIndex(id: Long, tree: String, metadataIndex: String)
 
   @Query("UPDATE prompt_files SET lastAccessedAt = :timestamp WHERE id = :id")
   suspend fun updateLastAccessed(id: Long, timestamp: Long = System.currentTimeMillis())
+
+  // SEARCH OPTIMIZATION: Fast filtering by display name or language
+  @Query("SELECT * FROM prompt_files WHERE displayName LIKE '%' || :query || '%' AND isArchived = 0")
+  fun searchFiles(query: String): Flow<List<PromptFileEntity>>
 
   @Delete
   suspend fun delete(entity: PromptFileEntity)

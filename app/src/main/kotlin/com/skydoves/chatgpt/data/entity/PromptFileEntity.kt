@@ -15,42 +15,32 @@ data class PromptFileEntity(
     val fileSizeBytes: Long = 0,
     val createdAt: Long = System.currentTimeMillis(),
     
-    // --- AI Context Wrapper Fields ---
-    
+    // --- AI Context Wrapper Caching ---
     /**
-     * Stores the last successfully generated project tree.
-     * This allows the "Context Wrapper" to bundle the tree instantly.
+     * Cache for the directory structure. 
+     * Optimization: We read this instead of re-scanning the ZIP.
      */
     val lastKnownTree: String? = null,
 
     /**
-     * AI-generated or user-defined summary of the file's purpose.
+     * Cache for the project summary.
      */
     val summary: String? = null,
 
     /**
-     * User-defined patterns to exclude from tree generation (e.g., "node_modules, .git").
+     * Patterns like "node_modules, .git" to keep the AI focus sharp.
      */
-    val customIgnorePatterns: String? = null,
+    val customIgnorePatterns: String? = "node_modules, .git, build, .gradle",
 
-    /**
-     * Categorization tags (e.g., "Feature", "Bugfix", "Legacy").
-     */
     val tags: String? = null,
 
-    // --- UI State & Workflow Management ---
-    
+    // --- State Management ---
     val isFavorite: Boolean = false,
-    
     val isArchived: Boolean = false,
-
-    /**
-     * Updated every time this file is bundled for an AI prompt.
-     */
     val lastAccessedAt: Long = System.currentTimeMillis(),
 
     /**
-     * Quick-access extension for language-specific formatting in prompts.
+     * Computed at creation for high-speed UI filtering.
      */
     val extension: String? = displayName.substringAfterLast('.', "")
 )
