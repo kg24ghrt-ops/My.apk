@@ -36,6 +36,7 @@ fun PromptAppScreen() {
     val ctx = LocalContext.current
 
     val files by vm.filesFlow.collectAsState()
+    val searchQuery by vm.searchQuery.collectAsState()
     val errorMessage by vm.errorFlow.collectAsState()
     val selectedContent by vm.selectedFileContent.collectAsState()
     val activeTree by vm.activeProjectTree.collectAsState()
@@ -55,6 +56,12 @@ fun PromptAppScreen() {
             TopHeader()
             Spacer(modifier = Modifier.height(16.dp))
             
+            // OPTIMIZATION: Instant Search Bar
+            M3SearchBar(searchQuery) { vm.updateSearchQuery(it) }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // OPTIMIZATION: Presets + Config
             BundleConfigPanel(vm)
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -78,7 +85,7 @@ fun PromptAppScreen() {
                 )
             } else {
                 Text(
-                    text = "Workspace Assets",
+                    text = if (searchQuery.isEmpty()) "Workspace Assets" else "Search Results",
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
                     fontWeight = FontWeight.Bold
@@ -111,6 +118,32 @@ fun PromptAppScreen() {
     }
 }
 
+@Composable
+private fun M3SearchBar(query: String, onQueryChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text("Search files or languages...", color = Color.Gray, fontSize = 14.sp) },
+        leadingIcon = { Icon(Icons.Default.Search, null, tint = Color(0xFF00E5FF)) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(Icons.Default.Close, null, tint = Color.Gray)
+                }
+            }
+        },
+        shape = RoundedCornerShape(12.dp),
+        singleLine = true,
+        colors = OutlinedTextFieldDefaults.colors(
+            unfocusedContainerColor = Color(0xFF161B22),
+            focusedContainerColor = Color(0xFF161B22),
+            focusedBorderColor = Color(0xFF00E5FF),
+            unfocusedBorderColor = Color(0xFF30363D)
+        )
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BundleConfigPanel(vm: PromptViewModel) {
@@ -120,16 +153,24 @@ private fun BundleConfigPanel(vm: PromptViewModel) {
     val incTask by vm.includeInstructions.collectAsState()
 
     Column {
-        Text(
-            "Context Packaging Strategy",
-            style = MaterialTheme.typography.labelMedium,
-            color = Color(0xFF00E5FF)
-        )
+        Text("Quick Presets", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
         Spacer(Modifier.height(8.dp))
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PresetChip("Review") { vm.applyPreset(BundlePreset.CODE_REVIEW) }
+            PresetChip("Arch") { vm.applyPreset(BundlePreset.ARCH_ONLY) }
+            PresetChip("Fix") { vm.applyPreset(BundlePreset.BUG_FIX) }
+            PresetChip("Task") { vm.applyPreset(BundlePreset.QUICK_TASK) }
+        }
+        
+        Spacer(Modifier.height(16.dp))
+        
+        Text("Manual Overrides", style = MaterialTheme.typography.labelMedium, color = Color(0xFF00E5FF))
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ConfigChip("Tree", incTree) { vm.toggleTree(it) }
@@ -138,6 +179,20 @@ private fun BundleConfigPanel(vm: PromptViewModel) {
             ConfigChip("Task", incTask) { vm.toggleInstructions(it) }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PresetChip(label: String, onClick: () -> Unit) {
+    AssistChip(
+        onClick = onClick,
+        label = { Text(label, fontSize = 11.sp) },
+        colors = AssistChipDefaults.assistChipColors(
+            containerColor = Color(0xFF21262D),
+            labelColor = Color.White
+        ),
+        border = AssistChipDefaults.assistChipBorder(borderColor = Color(0xFF30363D))
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -170,7 +225,6 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
             containerColor = Color(0xFF161B22),
             contentColor = Color.White
         ),
-        // FIXED: Corrected parameter passing for Material 3 Card Border
         border = CardDefaults.outlinedCardBorder(enabled = true)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
