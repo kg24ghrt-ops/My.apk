@@ -93,7 +93,7 @@ dependencies {
  
   // core modules
  
-  implementation("androidx.compose.material3:material3:1.2.0")
+  implementation("androidx.compose.material3:material3:1.3.1")
   implementation(project(":core-designsystem"))
   implementation(project(":core-navigation"))
   implementation(project(":core-data"))
