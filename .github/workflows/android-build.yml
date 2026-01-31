@@ -13,41 +13,31 @@ jobs:
     name: Build Android Debug APK
     runs-on: ubuntu-latest
 
-    env:
-      JAVA_HOME: /usr/lib/jvm/java-17-openjdk
-
     steps:
-      # 1. Checkout code
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Updated to v4
 
-      # 2. Set up JDK 17
       - name: Set up JDK 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4 # Updated to v4
         with:
-          distribution: temurin
-          java-version: 17
+          distribution: 'temurin'
+          java-version: '17'
 
-      # 3. Cache Gradle dependencies
-      - name: Cache Gradle packages
-        uses: actions/cache@v3
+      # BETTER CACHING: This official action handles the nitty-gritty of Android KSP/Compose caching
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper/
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle
+          gradle-version: wrapper
+          # This ensures we don't reuse the broken 1.2.0 build cache
+          cache-overwrite-existing: true 
 
-      # 4. Make Gradle wrapper executable
       - name: Make Gradle Wrapper executable
         run: chmod +x ./gradlew
 
-      # 5. Build Debug APK
+      # FORCE CLEAN: We add 'clean' to ensure the ChipBorder error is purged from KSP
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew clean assembleDebug --no-build-cache
 
-      # 6. Upload Debug APK artifact
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
