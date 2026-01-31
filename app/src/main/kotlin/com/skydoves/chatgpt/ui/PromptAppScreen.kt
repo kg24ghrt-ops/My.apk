@@ -6,7 +6,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.BorderStroke // CRITICAL IMPORT
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -224,7 +224,7 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
             containerColor = Color(0xFF161B22),
             contentColor = Color.White
         ),
-        // FIX: Replaced CardDefaults.outlinedCardBorder() with BorderStroke to prevent CI compilation errors
+        // FIX: Hard-coded BorderStroke to satisfy the compiler and avoid ChipBorder mismatch
         border = BorderStroke(1.dp, Color(0xFF30363D))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {

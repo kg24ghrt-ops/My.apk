@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import com.skydoves.chatgpt.data.AppDatabase
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
@@ -18,17 +19,26 @@ class PromptRepository(private val context: Context) {
     private val db = AppDatabase.getInstance(appContext)
     private val dao = db.promptFileDao()
     
-    // Memory Optimization: Larger buffer for faster disk reads, smaller shared buffer for strings
-    private val sharedBuffer = ByteArray(16384) 
+    // Performance: Using a consistent buffer size for IO operations
+    private val IO_BUFFER_SIZE = 16384 
 
     private val IGNORED_PATHS = listOf("/node_modules/", "/.git/", "/build/", "/.gradle/", "/.idea/")
     private val IGNORED_FILES = listOf("package-lock.json", "yarn.lock", ".DS_Store", "LICENSE")
 
-    fun allFilesFlow() = dao.observeAll()
+    /**
+     * Observes all non-archived files.
+     */
+    fun allFilesFlow(): Flow<List<PromptFileEntity>> = dao.observeAll()
 
     /**
-     * OPTIMIZATION: Instant Bundling.
-     * Uses cached metadata from the DB instead of re-processing the file.
+     * FIX: Added for search functionality in PromptViewModel.
+     * Uses the optimized Room query for displayName and language.
+     */
+    fun searchFiles(query: String): Flow<List<PromptFileEntity>> = dao.searchFiles(query)
+
+    /**
+     * Bundles project context into a single string for AI ingestion.
+     * Uses cached data where possible to minimize disk IO.
      */
     suspend fun bundleContextForAI(
         entity: PromptFileEntity,
@@ -39,7 +49,6 @@ class PromptRepository(private val context: Context) {
     ): String = withContext(Dispatchers.IO) {
         dao.updateLastAccessed(entity.id)
         
-        // If we don't have a cached tree yet, generate it on the fly (Safety fallback)
         val tree = if (includeTree) {
             entity.lastKnownTree ?: generateProjectTreeFromZip(entity, includePreview)
         } else null
@@ -48,9 +57,8 @@ class PromptRepository(private val context: Context) {
 
         StringBuilder().apply {
             append("### DEV-AI CONTEXT: ${entity.displayName}\n")
-            
             if (includeSummary) append("#### SUMMARY\n$summary\n\n")
-
+            
             if (includeTree && !tree.isNullOrBlank()) {
                 append("#### DIRECTORY & SOURCE STRUCTURE\n")
                 append("```text\n$tree\n```\n\n")
@@ -64,14 +72,12 @@ class PromptRepository(private val context: Context) {
     }
 
     /**
-     * OPTIMIZATION: Pre-Index on Import.
-     * We scan the ZIP once and store the result in the database.
+     * Imports a file from a Uri, saves it to internal storage, and pre-indexes it.
      */
     suspend fun importUriAsFile(uri: Uri, displayName: String?): Long = withContext(Dispatchers.IO) {
         val nameHint = displayName ?: queryFileName(uri) ?: "file_${System.currentTimeMillis()}"
         val originalFile = File(appContext.filesDir, nameHint)
         
-        // Efficient Stream Copy
         appContext.contentResolver.openInputStream(uri)?.use { input ->
             originalFile.outputStream().use { out -> input.copyTo(out) }
         }
@@ -84,15 +90,17 @@ class PromptRepository(private val context: Context) {
         )
 
         val id = dao.insert(entity)
-        val insertedEntity = entity.copy(id = id)
-
-        // PRE-INDEXING: Build the tree immediately after import so bundling is instant later
-        val initialTree = generateProjectTreeFromZip(insertedEntity, includeContent = true)
+        
+        // Immediate Indexing: Ensures "Bundle" and "Tree" buttons work instantly
+        val initialTree = generateProjectTreeFromZip(entity.copy(id = id), includeContent = true)
         dao.updateMetadataIndex(id, initialTree, "Initial project scan complete.")
         
         return@withContext id
     }
 
+    /**
+     * Scans ZIP files to generate a visual directory tree.
+     */
     suspend fun generateProjectTreeFromZip(
         entity: PromptFileEntity, 
         includeContent: Boolean
@@ -100,10 +108,11 @@ class PromptRepository(private val context: Context) {
         val zipFile = File(entity.filePath)
         if (!zipFile.exists()) return@withContext "File missing."
 
-        val treeBuilder = StringBuilder(8192) // Pre-allocate size to reduce re-allocations
+        val treeBuilder = StringBuilder(8192)
+        val buffer = ByteArray(IO_BUFFER_SIZE)
 
         try {
-            ZipInputStream(BufferedInputStream(zipFile.inputStream(), 16384)).use { zip ->
+            ZipInputStream(BufferedInputStream(zipFile.inputStream(), IO_BUFFER_SIZE)).use { zip ->
                 var entry: ZipEntry? = zip.nextEntry
                 while (entry != null) {
                     if (shouldIgnore(entry.name)) {
@@ -123,9 +132,9 @@ class PromptRepository(private val context: Context) {
                         
                         if (includeContent && looksLikeTextOrCode(entry.name)) {
                             val contentIndent = "$indent    "
-                            val bytesRead = zip.read(sharedBuffer)
+                            val bytesRead = zip.read(buffer)
                             if (bytesRead > 0) {
-                                val chunk = String(sharedBuffer, 0, bytesRead, Charsets.UTF_8)
+                                val chunk = String(buffer, 0, bytesRead, Charsets.UTF_8)
                                 chunk.lineSequence().take(8).forEach { line ->
                                     if (line.isNotBlank()) treeBuilder.append("$contentIndent$line\n")
                                 }
@@ -137,7 +146,6 @@ class PromptRepository(private val context: Context) {
                 }
             }
             val result = treeBuilder.toString()
-            // Cache the result back to the DB to avoid re-calculating
             dao.updateTree(entity.id, result)
             return@withContext result
         } catch (e: Exception) {
@@ -151,17 +159,6 @@ class PromptRepository(private val context: Context) {
     private fun looksLikeTextOrCode(name: String): Boolean {
         val ext = listOf(".kt", ".java", ".xml", ".json", ".md", ".txt", ".gradle", ".js", ".py")
         return ext.any { name.lowercase().endsWith(it) }
-    }
-
-    suspend fun readChunk(entity: PromptFileEntity, offset: Long, size: Int): Pair<String, Long> = withContext(Dispatchers.IO) {
-        val file = File(entity.filePath)
-        if (!file.exists()) return@withContext "" to -1L
-        val buffer = ByteArray(size)
-        java.io.RandomAccessFile(file, "r").use { raf ->
-            raf.seek(offset)
-            val read = raf.read(buffer)
-            String(buffer, 0, read) to (if (offset + read >= raf.length()) -1L else offset + read)
-        }
     }
 
     suspend fun delete(entity: PromptFileEntity) = withContext(Dispatchers.IO) {

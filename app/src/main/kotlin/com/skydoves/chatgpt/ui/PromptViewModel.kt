@@ -8,14 +8,12 @@ import com.skydoves.chatgpt.data.entity.PromptFileEntity
 import com.skydoves.chatgpt.repo.PromptRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.PrintWriter
 import java.io.StringWriter
 
-/**
- * Optimization: Presets for rapid configuration
- */
 enum class BundlePreset {
     CODE_REVIEW, ARCH_ONLY, BUG_FIX, QUICK_TASK
 }
@@ -24,11 +22,9 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
 
     private val repo = PromptRepository(application.applicationContext)
 
-    // --- SEARCH OPTIMIZATION ---
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
 
-    // --- PACKAGING STRATEGY STATES ---
     private val _includeTree = MutableStateFlow(true)
     val includeTree = _includeTree.asStateFlow()
 
@@ -41,7 +37,40 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     private val _includeInstructions = MutableStateFlow(true)
     val includeInstructions = _includeInstructions.asStateFlow()
 
-    // --- TOGGLE & PRESET ACTIONS ---
+    // --- WORKSPACE FLOW (NOW DEBOUNCED & OPTIMIZED) ---
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
+    val filesFlow = _searchQuery
+        .debounce(300L) // NEW: Wait 300ms for user to stop typing
+        .distinctUntilChanged() // NEW: Don't search if the query didn't actually change
+        .flatMapLatest { query ->
+            if (query.isBlank()) repo.allFilesFlow()
+            else repo.searchFiles(query) 
+        }
+        .flowOn(Dispatchers.IO)
+        .stateIn(
+            scope = viewModelScope, 
+            started = SharingStarted.WhileSubscribed(5000), // NEW: Memory-safe shutdown
+            initialValue = emptyList()
+        )
+
+    private val _selectedFileContent = MutableStateFlow<String?>(null)
+    val selectedFileContent = _selectedFileContent.asStateFlow()
+
+    private val _activeProjectTree = MutableStateFlow<String?>(null)
+    val activeProjectTree = _activeProjectTree.asStateFlow()
+
+    private val _aiContextBundle = MutableStateFlow<String?>(null)
+    val aiContextBundle = _aiContextBundle.asStateFlow()
+
+    private val _isProcessing = MutableStateFlow(false)
+    val isProcessing = _isProcessing.asStateFlow()
+
+    private val _errorFlow = MutableStateFlow<String?>(null)
+    val errorFlow = _errorFlow.asStateFlow()
+
+    // --- ACTIONS ---
+    fun updateSearchQuery(query: String) { _searchQuery.value = query }
+
     fun toggleTree(value: Boolean) { _includeTree.value = value }
     fun togglePreview(value: Boolean) { _includePreview.value = value }
     fun toggleSummary(value: Boolean) { _includeSummary.value = value }
@@ -49,58 +78,15 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
 
     fun applyPreset(preset: BundlePreset) {
         when (preset) {
-            BundlePreset.CODE_REVIEW -> {
-                toggleTree(true); togglePreview(true); toggleSummary(true); toggleInstructions(true)
-            }
-            BundlePreset.ARCH_ONLY -> {
-                toggleTree(true); togglePreview(false); toggleSummary(true); toggleInstructions(false)
-            }
-            BundlePreset.BUG_FIX -> {
-                toggleTree(true); togglePreview(true); toggleSummary(false); toggleInstructions(true)
-            }
-            BundlePreset.QUICK_TASK -> {
-                toggleTree(false); togglePreview(false); toggleSummary(true); toggleInstructions(true)
-            }
+            BundlePreset.CODE_REVIEW -> { toggleTree(true); togglePreview(true); toggleSummary(true); toggleInstructions(true) }
+            BundlePreset.ARCH_ONLY -> { toggleTree(true); togglePreview(false); toggleSummary(true); toggleInstructions(false) }
+            BundlePreset.BUG_FIX -> { toggleTree(true); togglePreview(true); toggleSummary(false); toggleInstructions(true) }
+            BundlePreset.QUICK_TASK -> { toggleTree(false); togglePreview(false); toggleSummary(true); toggleInstructions(true) }
         }
     }
 
-    // --- WORKSPACE STATES (Optimized with Search) ---
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val filesFlow = _searchQuery
-        .flatMapLatest { query ->
-            if (query.isEmpty()) repo.allFilesFlow()
-            else repo.searchFiles(query) 
-        }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-    fun updateSearchQuery(query: String) { _searchQuery.value = query }
-
-    private val _selectedFileContent = MutableStateFlow<String?>(null)
-    val selectedFileContent: StateFlow<String?> = _selectedFileContent.asStateFlow()
-
-    private val _activeProjectTree = MutableStateFlow<String?>(null)
-    val activeProjectTree: StateFlow<String?> = _activeProjectTree.asStateFlow()
-
-    private val _aiContextBundle = MutableStateFlow<String?>(null)
-    val aiContextBundle: StateFlow<String?> = _aiContextBundle.asStateFlow()
-
-    private val _isProcessing = MutableStateFlow(false)
-    val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
-
-    private val _errorFlow = MutableStateFlow<String?>(null)
-    val errorFlow: StateFlow<String?> = _errorFlow.asStateFlow()
-
-    private fun reportError(tag: String, throwable: Throwable) {
-        val sw = StringWriter()
-        throwable.printStackTrace(PrintWriter(sw))
-        _errorFlow.value = "❌ $tag Error: ${throwable.localizedMessage ?: "Unknown failure"}"
-    }
-
-    fun clearError() { _errorFlow.value = null }
-
-    // --- ACTIONS ---
     fun importUri(uri: Uri, displayName: String?) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isProcessing.value = true
             try { repo.importUriAsFile(uri, displayName) } 
             catch (e: Exception) { reportError("Import", e) }
@@ -110,50 +96,45 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
 
     fun prepareAIContext(entity: PromptFileEntity) {
         if (_isProcessing.value) return 
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isProcessing.value = true
             try {
-                // Uses optimized cached results in Repository for 50ms bundling
-                val bundle = repo.bundleContextForAI(
+                _aiContextBundle.value = repo.bundleContextForAI(
                     entity = entity,
                     includeTree = _includeTree.value,
                     includePreview = _includePreview.value,
                     includeSummary = _includeSummary.value,
                     includeInstructions = _includeInstructions.value
                 )
-                _aiContextBundle.value = bundle
-            } catch (e: Exception) {
-                reportError("Context Bundling", e)
-            } finally {
-                _isProcessing.value = false
-            }
+            } catch (e: Exception) { reportError("Bundling", e) }
+            finally { _isProcessing.value = false }
         }
     }
 
     fun loadFilePreview(entity: PromptFileEntity) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             try {
-                val (content, _) = repo.readChunk(entity, 0L, 32 * 1024)
+                val (content, _) = repo.readChunk(entity, 0L, 32768)
                 _selectedFileContent.value = if (isBinaryContent(content)) {
-                    "[Binary File Detected - Preview Disabled for Safety]"
+                    "📂 [Binary/Large File] Preview hidden for stability."
                 } else content
             } catch (e: Exception) { reportError("Preview", e) }
         }
     }
 
-    private fun isBinaryContent(text: String): Boolean {
-        if (text.isEmpty()) return false
-        return text.count { it == '\u0000' } > 0 || 
-               text.take(100).any { it.code < 32 && it != '\n' && it != '\r' && it != '\t' }
+    fun requestProjectTree(entity: PromptFileEntity) {
+        viewModelScope.launch {
+            _activeProjectTree.value = "⏳ Scanning structure..."
+            try {
+                _activeProjectTree.value = repo.generateProjectTreeFromZip(entity, false)
+            } catch (e: Exception) { reportError("Tree", e) }
+        }
     }
 
-    fun requestProjectTree(entity: PromptFileEntity) {
-        viewModelScope.launch(Dispatchers.IO) {
-            _activeProjectTree.value = "⏳ Generating File Tree..."
-            try {
-                _activeProjectTree.value = repo.generateProjectTreeFromZip(entity, includeContent = false)
-            } catch (e: Exception) { reportError("Tree Generation", e) }
-        }
+    private fun isBinaryContent(text: String): Boolean {
+        if (text.isEmpty()) return false
+        // Optimized check: scan only common control characters
+        return text.take(200).any { it.code < 32 && it != '\n' && it != '\r' && it != '\t' }
     }
 
     fun closePreview() {
@@ -163,9 +144,15 @@ class PromptViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun delete(entity: PromptFileEntity) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             try { repo.delete(entity) } 
             catch (e: Exception) { reportError("Delete", e) }
         }
     }
+
+    private fun reportError(tag: String, t: Throwable) {
+        _errorFlow.value = "❌ $tag: ${t.localizedMessage ?: "Unknown Error"}"
+    }
+
+    fun clearError() { _errorFlow.value = null }
 }
