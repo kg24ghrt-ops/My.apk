@@ -7,26 +7,28 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -37,6 +39,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
+
+// --- Design Tokens ---
+private val DarkBg = Color(0xFF080A0C)
+private val CardBg = Color(0xFF12161B)
+private val AccentCyan = Color(0xFF00E5FF)
+private val AccentPurple = Color(0xFF7000FF)
+private val BorderColor = Color(0xFF232931)
+private val TextPrimary = Color(0xFFE6EDF3)
+private val TextSecondary = Color(0xFF8B949E)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,79 +64,63 @@ fun PromptAppScreen() {
     val bundledContent by vm.aiContextBundle.collectAsState()
     val isProcessing by vm.isProcessing.collectAsState()
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF0B0E14)
-    ) {
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            AnimatedVisibility(
-                visible = errorMessage != null,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                errorMessage?.let {
-                    ErrorPanel(it) { vm.clearError() }
-                    Spacer(modifier = Modifier.height(12.dp))
+    Box(modifier = Modifier.fillMaxSize().background(DarkBg)) {
+        // Subtle Background Glow
+        Box(modifier = Modifier.size(300.dp).align(Alignment.TopEnd).offset(x = 100.dp, y = (-100).dp)
+            .background(Brush.radialGradient(listOf(AccentCyan.copy(alpha = 0.15f), Color.Transparent))))
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Enhanced Header
+            ModernTopHeader()
+
+            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                AnimatedVisibility(visible = errorMessage != null) {
+                    errorMessage?.let { ErrorPanel(it) { vm.clearError() } }
                 }
-            }
 
-            TopHeader()
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            M3SearchBar(searchQuery) { vm.updateSearchQuery(it) }
-            
-            Spacer(modifier = Modifier.height(20.dp))
-            BundleConfigPanel(vm)
-            
-            Spacer(modifier = Modifier.height(20.dp))
-            M3ImportRow(vm)
-            
-            Spacer(modifier = Modifier.height(32.dp))
+                // Command Center Area
+                Surface(
+                    color = CardBg.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, BorderColor),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        M3SearchBar(searchQuery) { vm.updateSearchQuery(it) }
+                        Spacer(Modifier.height(16.dp))
+                        BundleConfigPanel(vm)
+                    }
+                }
 
-            Box(modifier = Modifier.weight(1f)) {
-                Crossfade(targetState = (bundledContent ?: activeTree ?: selectedContent), label = "view_switcher") { previewContent ->
-                    if (previewContent != null) {
-                        M3PreviewPanel(
-                            title = when {
-                                bundledContent != null -> "AI Bundle Output"
-                                activeTree != null -> "Project Architecture"
-                                else -> "Source Preview"
-                            },
-                            content = previewContent,
-                            onClose = { vm.closePreview() },
-                            onCopy = { text ->
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("DevAI", text))
-                                Toast.makeText(ctx, "Copied to Clipboard", Toast.LENGTH_SHORT).show()
-                            }
-                        )
-                    } else {
-                        Column {
-                            Text(
-                                text = if (searchQuery.isEmpty()) "Workspace Assets" else "Filtered Results",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Color.Gray,
-                                fontWeight = FontWeight.SemiBold,
-                                letterSpacing = 0.5.sp
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                M3ImportRow(vm)
+                Spacer(modifier = Modifier.height(20.dp))
 
-                            if (files.isEmpty()) {
-                                EmptyWorkspaceState()
-                            } else {
-                                LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    contentPadding = PaddingValues(bottom = 24.dp),
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    items(files, key = { it.id }) { f ->
-                                        M3FileCard(f, vm)
-                                    }
+                // Main Content Area with Animated Switcher
+                Box(modifier = Modifier.weight(1f)) {
+                    AnimatedContent(
+                        targetState = (bundledContent ?: activeTree ?: selectedContent),
+                        transitionSpec = { fadeIn() + scaleIn(initialScale = 0.98f) togetherWith fadeOut() },
+                        label = "content_transition"
+                    ) { previewContent ->
+                        if (previewContent != null) {
+                            IDEPreviewPanel(
+                                title = when {
+                                    bundledContent != null -> "AI_BUNDLE.md"
+                                    activeTree != null -> "PROJECT_TREE.log"
+                                    else -> "SOURCE_VIEW"
+                                },
+                                content = previewContent,
+                                onClose = { vm.closePreview() },
+                                onCopy = { text ->
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("DevAI", text))
+                                    Toast.makeText(ctx, "Buffer Synchronized", Toast.LENGTH_SHORT).show()
                                 }
-                            }
+                            )
+                        } else {
+                            WorkspaceGrid(files, searchQuery, vm)
                         }
                     }
                 }
@@ -133,194 +128,150 @@ fun PromptAppScreen() {
         }
 
         if (isProcessing) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.8f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = Color(0xFF00E5FF), strokeWidth = 3.dp)
-                    Spacer(Modifier.height(16.dp))
-                    Text("Synthesizing Context...", color = Color(0xFF00E5FF), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                }
-            }
+            ProcessingOverlay()
         }
     }
 }
 
 @Composable
-private fun M3SearchBar(query: String, onQueryChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
-        modifier = Modifier.fillMaxWidth(),
-        textStyle = TextStyle(color = Color.White, fontSize = 15.sp, fontFamily = FontFamily.Monospace),
-        placeholder = { Text("Search assets...", color = Color.Gray, fontSize = 14.sp) },
-        leadingIcon = { Icon(Icons.Default.Search, null, tint = Color(0xFF00E5FF), modifier = Modifier.size(20.dp)) },
-        trailingIcon = {
-            if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Default.Clear, null, tint = Color.Gray)
-                }
-            }
-        },
-        shape = RoundedCornerShape(12.dp),
-        singleLine = true,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
-            disabledTextColor = Color.Gray,
-            unfocusedContainerColor = Color(0xFF161B22),
-            focusedContainerColor = Color(0xFF1C2128),
-            focusedBorderColor = Color(0xFF00E5FF).copy(alpha = 0.8f),
-            unfocusedBorderColor = Color(0xFF30363D),
-            cursorColor = Color(0xFF00E5FF),
-            selectionColors = TextSelectionColors(
-                handleColor = Color(0xFF00E5FF),
-                backgroundColor = Color(0xFF00E5FF).copy(alpha = 0.3f)
+private fun ModernTopHeader() {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(24.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .background(Brush.linearGradient(listOf(AccentCyan, AccentPurple)), RoundedCornerShape(14.dp))
+                .padding(1.dp)
+                .background(DarkBg, RoundedCornerShape(13.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Rounded.Terminal, null, tint = AccentCyan, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text(
+                "DEV_AI",
+                style = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 20.sp,
+                    letterSpacing = 2.sp,
+                    color = Color.White
+                )
             )
-        )
-    )
+            Text(
+                "SYSTEM ORCHESTRATOR v2.4",
+                style = MaterialTheme.typography.labelSmall,
+                color = AccentCyan.copy(alpha = 0.7f)
+            )
+        }
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BundleConfigPanel(vm: PromptViewModel) {
-    val incTree by vm.includeTree.collectAsState()
-    val incPreview by vm.includePreview.collectAsState()
-    val incSummary by vm.includeSummary.collectAsState()
-    val incTask by vm.includeInstructions.collectAsState()
-
+private fun WorkspaceGrid(files: List<PromptFileEntity>, query: String, vm: PromptViewModel) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Tune, null, tint = Color.Gray, modifier = Modifier.size(12.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("AI BUNDLE PARAMETERS", style = MaterialTheme.typography.labelSmall, color = Color.Gray, letterSpacing = 1.sp)
+            Box(Modifier.size(8.dp, 18.dp).background(AccentPurple, RoundedCornerShape(2.dp)))
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = if (query.isEmpty()) "ACTIVE_WORKSPACE" else "FILTERED_NODES",
+                style = MaterialTheme.typography.labelLarge,
+                color = TextSecondary,
+                fontFamily = FontFamily.Monospace
+            )
         }
-        Spacer(Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ConfigChip("File Tree", incTree) { vm.toggleTree(it) }
-            ConfigChip("Code Body", incPreview) { vm.togglePreview(it) }
-            ConfigChip("Briefing", incSummary) { vm.toggleSummary(it) }
-            ConfigChip("Instructions", incTask) { vm.toggleInstructions(it) }
+        Spacer(Modifier.height(16.dp))
+
+        if (files.isEmpty()) {
+            EmptyWorkspaceState()
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 32.dp)
+            ) {
+                items(files, key = { it.id }) { f ->
+                    GlassFileCard(f, vm)
+                }
+            }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ConfigChip(label: String, selected: Boolean, onToggle: (Boolean) -> Unit) {
-    FilterChip(
-        selected = selected,
-        onClick = { onToggle(!selected) },
-        label = { 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (selected) {
-                    Box(modifier = Modifier.size(6.dp).background(Color(0xFF00E5FF), CircleShape))
-                    Spacer(Modifier.width(6.dp))
-                }
-                Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium) 
-            }
-        },
-        shape = RoundedCornerShape(8.dp),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = Color.Transparent,
-            labelColor = Color.Gray,
-            selectedContainerColor = Color(0xFF00E5FF).copy(alpha = 0.1f),
-            selectedLabelColor = Color(0xFF00E5FF)
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            enabled = true,
-            selected = selected,
-            borderColor = Color(0xFF30363D),
-            selectedBorderColor = Color(0xFF00E5FF).copy(alpha = 0.5f),
-            borderWidth = 1.dp
-        )
-    )
-}
+private fun GlassFileCard(entity: PromptFileEntity, vm: PromptViewModel) {
+    var isPressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (isPressed) 0.97f else 1f, label = "")
 
-@Composable
-private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
-    val haptics = LocalHapticFeedback.current
-    
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
-        border = BorderStroke(1.dp, Color(0xFF30363D))
+    Surface(
+        onClick = { /* Detail view if needed */ },
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer(scaleX = scale, scaleY = scale),
+        shape = RoundedCornerShape(16.dp),
+        color = CardBg,
+        border = BorderStroke(1.dp, BorderColor)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    color = Color(0xFF00E5FF).copy(alpha = 0.05f),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.size(40.dp).border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                // Extension Badge
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(AccentCyan.copy(alpha = 0.1f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (entity.language == "zip") Icons.Default.FolderZip else Icons.Default.Code,
-                            contentDescription = null,
-                            tint = Color(0xFF00E5FF),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        entity.displayName, 
-                        style = MaterialTheme.typography.bodyMedium, 
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                    Icon(
+                        imageVector = if (entity.language == "zip") Icons.Rounded.FolderZip else Icons.Rounded.DataArray,
+                        contentDescription = null,
+                        tint = AccentCyan,
+                        modifier = Modifier.size(20.dp)
                     )
-                    Text(
-                        "${entity.fileSizeBytes / 1024} KB • ${entity.language?.uppercase() ?: "RAW"}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-                IconButton(onClick = { 
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    vm.delete(entity) 
-                }) {
-                    Icon(Icons.Default.DeleteOutline, null, tint = Color(0xFFF85149).copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { vm.loadFilePreview(entity) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, Color(0xFF30363D)),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("Inspect", fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
                 }
                 
-                Button(
-                    onClick = { 
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        vm.prepareAIContext(entity) 
-                    },
-                    modifier = Modifier.weight(1.5f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(0.dp)
+                Spacer(Modifier.width(16.dp))
+                
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        entity.displayName,
+                        style = TextStyle(color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    )
+                    Text(
+                        "${entity.language?.uppercase() ?: "BLOB"} // ${entity.fileSizeBytes / 1024} KB",
+                        style = TextStyle(fontFamily = FontFamily.Monospace, color = TextSecondary, fontSize = 11.sp)
+                    )
+                }
+
+                IconButton(onClick = { vm.delete(entity) }) {
+                    Icon(Icons.Rounded.DeleteSweep, null, tint = Color(0xFFFF5555), modifier = Modifier.size(20.dp))
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Secondary Action
+                TextButton(
+                    onClick = { vm.loadFilePreview(entity) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.textButtonColors(contentColor = TextPrimary),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("AI Bundle", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("INSPECT", style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp))
+                }
+
+                // Primary Action: Glow Button
+                Button(
+                    onClick = { vm.prepareAIContext(entity) },
+                    modifier = Modifier.weight(1.2f).shadow(elevation = 8.dp, ambientColor = AccentCyan, spotColor = AccentCyan),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Rounded.AutoAwesome, null, tint = DarkBg, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("SYNTHESIZE", color = DarkBg, style = TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 12.sp))
                 }
             }
         }
@@ -328,48 +279,58 @@ private fun M3FileCard(entity: PromptFileEntity, vm: PromptViewModel) {
 }
 
 @Composable
-private fun M3PreviewPanel(title: String, content: String, onClose: () -> Unit, onCopy: (String) -> Unit) {
-    val panelShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+private fun IDEPreviewPanel(title: String, content: String, onClose: () -> Unit, onCopy: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D1117), panelShape)
-            .border(1.dp, Color(0xFF30363D), panelShape)
+            .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+            .background(Color(0xFF0D1117))
+            .border(1.dp, BorderColor, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
     ) {
+        // Toolbar
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth().background(Color(0xFF161B22)).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(title, color = Color(0xFF00E5FF), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                Text("Ready for AI injection", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+            Icon(Icons.Rounded.Description, null, tint = AccentCyan, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(title, color = TextPrimary, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { onCopy(content) }) {
+                Icon(Icons.Rounded.ContentCopy, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
             }
-            Row {
-                IconButton(onClick = { onCopy(content) }) { 
-                    Icon(Icons.Default.ContentCopy, null, tint = Color.White, modifier = Modifier.size(20.dp)) 
-                }
-                IconButton(onClick = onClose) { 
-                    Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(20.dp)) 
-                }
+            IconButton(onClick = onClose) {
+                Icon(Icons.Rounded.Close, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
             }
         }
-        
-        HorizontalDivider(color = Color(0xFF30363D))
-        
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-            items(content.lines()) { line ->
-                Text(
-                    text = line,
-                    color = when {
-                        line.startsWith("###") -> Color(0xFF00E5FF)
-                        line.contains("[Binary") -> Color(0xFFF85149)
-                        else -> Color(0xFFC9D1D9)
-                    },
-                    style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp)
-                )
+
+        // Code Area
+        Box(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                val lines = content.lines()
+                items(lines.size) { index ->
+                    Row {
+                        // Line Number Gutter
+                        Text(
+                            text = (index + 1).toString().padStart(3, ' '),
+                            color = Color.DarkGray,
+                            style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                            modifier = Modifier.width(30.dp).padding(top = 2.dp)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        // Code Content
+                        val line = lines[index]
+                        Text(
+                            text = line,
+                            color = when {
+                                line.trim().startsWith("###") -> AccentCyan
+                                line.contains(":") -> Color(0xFFD2A8FF)
+                                else -> Color(0xFFC9D1D9)
+                            },
+                            style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 18.sp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -386,114 +347,149 @@ private fun M3ImportRow(vm: PromptViewModel) {
         OutlinedTextField(
             value = alias,
             onValueChange = { alias = it },
-            placeholder = { Text("Label (optional)", fontSize = 12.sp) },
+            placeholder = { Text("Set logic alias...", color = TextSecondary) },
             modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(12.dp),
-            singleLine = true,
-            textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+            textStyle = TextStyle(color = Color.White, fontFamily = FontFamily.Monospace),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = Color(0xFF00E5FF).copy(alpha = 0.5f),
-                unfocusedBorderColor = Color(0xFF30363D),
-                focusedContainerColor = Color(0xFF161B22),
-                unfocusedContainerColor = Color(0xFF161B22),
-                cursorColor = Color(0xFF00E5FF)
+                focusedContainerColor = CardBg,
+                unfocusedContainerColor = CardBg,
+                focusedBorderColor = AccentPurple,
+                unfocusedBorderColor = BorderColor
             )
         )
         Spacer(Modifier.width(12.dp))
         Button(
             onClick = { launcher.launch("*/*") },
-            modifier = Modifier.height(54.dp),
+            modifier = Modifier.height(56.dp).width(56.dp),
             shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
+            contentPadding = PaddingValues(0.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = AccentPurple)
         ) {
-            Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Import", fontWeight = FontWeight.Bold)
+            Icon(Icons.Rounded.Add, null, tint = Color.White)
         }
     }
 }
 
 @Composable
-private fun TopHeader() {
-    Row(
-        modifier = Modifier.padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+private fun ProcessingOverlay() {
+    val infiniteTransition = rememberInfiniteTransition(label = "")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(1000, easing = LinearEasing)), label = ""
+    )
+
+    Box(
+        modifier = Modifier.fillMaxSize().background(DarkBg.copy(alpha = 0.85f)).blur(10.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .shadow(elevation = 8.dp, shape = RoundedCornerShape(12.dp))
-                .background(
-                    brush = Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFF0095FF))),
-                    shape = RoundedCornerShape(12.dp)
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Default.Terminal, null, tint = Color.Black, modifier = Modifier.size(24.dp))
-        }
-        Spacer(Modifier.width(16.dp))
-        Column {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = 0.7f,
+                    modifier = Modifier.size(80.dp).graphicsLayer { rotationZ = rotation },
+                    color = AccentCyan,
+                    strokeWidth = 2.dp,
+                    trackColor = AccentCyan.copy(alpha = 0.1f)
+                )
+                Icon(Icons.Rounded.Memory, null, tint = AccentCyan, modifier = Modifier.size(32.dp))
+            }
+            Spacer(Modifier.height(24.dp))
             Text(
-                "DevAI Context", 
-                style = MaterialTheme.typography.headlineSmall, 
-                fontWeight = FontWeight.Black, 
-                color = Color.White,
-                letterSpacing = (-0.5).sp
-            )
-            Text(
-                "Workspace Orchestrator",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF00E5FF).copy(alpha = 0.6f),
-                letterSpacing = 0.5.sp
+                "COMPUTING_CONTEXT...",
+                style = TextStyle(fontFamily = FontFamily.Monospace, color = AccentCyan, letterSpacing = 2.sp)
             )
         }
+    }
+}
+
+// Re-using ConfigChip from original but with stylized updates
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConfigChip(label: String, selected: Boolean, onToggle: (Boolean) -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = { onToggle(!selected) },
+        label = { Text(label, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+        shape = RoundedCornerShape(6.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = AccentCyan.copy(alpha = 0.2f),
+            selectedLabelColor = AccentCyan
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            selectedBorderColor = AccentCyan,
+            borderColor = BorderColor,
+            borderWidth = 1.dp,
+            selectedBorderWidth = 1.dp
+        )
+    )
+}
+
+@Composable
+private fun M3SearchBar(query: String, onQueryChange: (String) -> Unit) {
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text("Search system nodes...", color = TextSecondary, fontSize = 14.sp) },
+        leadingIcon = { Icon(Icons.Rounded.Search, null, tint = AccentCyan) },
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            cursorColor = AccentCyan,
+            focusedTextColor = Color.White
+        ),
+        textStyle = TextStyle(fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+    )
+}
+
+@Composable
+private fun BundleConfigPanel(vm: PromptViewModel) {
+    val incTree by vm.includeTree.collectAsState()
+    val incPreview by vm.includePreview.collectAsState()
+    val incSummary by vm.includeSummary.collectAsState()
+    val incTask by vm.includeInstructions.collectAsState()
+
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        ConfigChip("TREE", incTree) { vm.toggleTree(it) }
+        ConfigChip("CODE", incPreview) { vm.togglePreview(it) }
+        ConfigChip("BRIEF", incSummary) { vm.toggleSummary(it) }
+        ConfigChip("TASK", incTask) { vm.toggleInstructions(it) }
     }
 }
 
 @Composable
 private fun EmptyWorkspaceState() {
     Column(
-        modifier = Modifier.fillMaxSize().padding(bottom = 64.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = Modifier.fillMaxSize().padding(bottom = 100.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Surface(
-            color = Color(0xFF161B22),
-            shape = CircleShape,
-            modifier = Modifier.size(80.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Terminal, null, modifier = Modifier.size(32.dp), tint = Color(0xFF30363D))
-            }
-        }
-        Spacer(Modifier.height(24.dp))
-        Text("Your Workspace is Empty", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Import a ZIP or project folder to begin\nsynthesizing context bundles.", 
-            color = Color.Gray, 
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            lineHeight = 18.sp
-        )
+        Icon(Icons.Rounded.CloudOff, null, modifier = Modifier.size(64.dp), tint = BorderColor)
+        Spacer(Modifier.height(16.dp))
+        Text("NO_DATA_NODES_FOUND", color = TextSecondary, fontFamily = FontFamily.Monospace)
     }
 }
 
 @Composable
 private fun ErrorPanel(msg: String, onDismiss: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF3D1919)),
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        color = Color(0xFF440000),
         shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, Color(0xFFF85149).copy(alpha = 0.2f))
+        border = BorderStroke(1.dp, Color.Red)
     ) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.ErrorOutline, null, tint = Color(0xFFF85149), modifier = Modifier.size(18.dp))
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Warning, null, tint = Color.Red, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(12.dp))
-            Text(msg, color = Color.White, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+            Text(msg, color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-                Icon(Icons.Default.Close, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
+                Icon(Icons.Rounded.Close, null, tint = Color.White)
             }
         }
     }
