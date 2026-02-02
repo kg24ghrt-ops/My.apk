@@ -17,7 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.TextSelectionColors // NEW IMPORT
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -35,25 +35,23 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle // Better for CI/CD stability
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.skydoves.chatgpt.data.entity.PromptFileEntity
 
-@OptIn(ExperimentalMaterial3Api::class, androidx.lifecycle.compose.ExperimentalLifecycleComposeApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PromptAppScreen() {
     val vm: PromptViewModel = viewModel()
     val ctx = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
-    // Using collectAsStateWithLifecycle to fix the warning in your CI logs
-    val files by vm.filesFlow.collectAsStateWithLifecycle(initialValue = emptyList())
-    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
-    val errorMessage by vm.errorFlow.collectAsStateWithLifecycle()
-    val selectedContent by vm.selectedFileContent.collectAsStateWithLifecycle()
-    val activeTree by vm.activeProjectTree.collectAsStateWithLifecycle()
-    val bundledContent by vm.aiContextBundle.collectAsStateWithLifecycle()
-    val isProcessing by vm.isProcessing.collectAsStateWithLifecycle()
+    val files by vm.filesFlow.collectAsState(initial = emptyList())
+    val searchQuery by vm.searchQuery.collectAsState()
+    val errorMessage by vm.errorFlow.collectAsState()
+    val selectedContent by vm.selectedFileContent.collectAsState()
+    val activeTree by vm.activeProjectTree.collectAsState()
+    val bundledContent by vm.aiContextBundle.collectAsState()
+    val isProcessing by vm.isProcessing.collectAsState()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -189,10 +187,10 @@ private fun M3SearchBar(query: String, onQueryChange: (String) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BundleConfigPanel(vm: PromptViewModel) {
-    val incTree by vm.includeTree.collectAsStateWithLifecycle()
-    val incPreview by vm.includePreview.collectAsStateWithLifecycle()
-    val incSummary by vm.includeSummary.collectAsStateWithLifecycle()
-    val incTask by vm.includeInstructions.collectAsStateWithLifecycle()
+    val incTree by vm.includeTree.collectAsState()
+    val incPreview by vm.includePreview.collectAsState()
+    val incSummary by vm.includeSummary.collectAsState()
+    val incTask by vm.includeInstructions.collectAsState()
 
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
