@@ -20,20 +20,25 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: 17
 
-      # Specialized Gradle setup for optimized caching
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+      # ✅ Stable Gradle cache (manual, reliable)
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        continue-on-error: true
         with:
-          gradle-version: wrapper
-          cache-overwrite-existing: true
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
 
       - name: Make Gradle Wrapper executable
         run: chmod +x ./gradlew
 
-      # Removed 'clean' and '--no-daemon' to allow faster, standard incremental builds
+      # 🚀 Fast incremental build
       - name: Build Debug APK
         run: ./gradlew assembleDebug
 

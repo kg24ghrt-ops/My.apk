@@ -81,7 +81,6 @@ fun PromptAppScreen() {
             Spacer(modifier = Modifier.height(20.dp))
             M3ImportRow(vm)
             
-            // CLEANUP: Increased padding for better hierarchy
             Spacer(modifier = Modifier.height(32.dp))
 
             Box(modifier = Modifier.weight(1f)) {
@@ -170,11 +169,16 @@ private fun M3SearchBar(query: String, onQueryChange: (String) -> Unit) {
         colors = OutlinedTextFieldDefaults.colors(
             focusedTextColor = Color.White,
             unfocusedTextColor = Color.White,
+            disabledTextColor = Color.Gray,
             unfocusedContainerColor = Color(0xFF161B22),
             focusedContainerColor = Color(0xFF1C2128),
-            focusedBorderColor = Color(0xFF00E5FF).copy(alpha = 0.5f),
+            focusedBorderColor = Color(0xFF00E5FF).copy(alpha = 0.8f),
             unfocusedBorderColor = Color(0xFF30363D),
-            cursorColor = Color(0xFF00E5FF)
+            cursorColor = Color(0xFF00E5FF),
+            selectionColors = TextSelectionColors(
+                handleColor = Color(0xFF00E5FF),
+                backgroundColor = Color(0xFF00E5FF).copy(alpha = 0.3f)
+            )
         )
     )
 }
@@ -387,10 +391,13 @@ private fun M3ImportRow(vm: PromptViewModel) {
             singleLine = true,
             textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
             colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
                 focusedBorderColor = Color(0xFF00E5FF).copy(alpha = 0.5f),
                 unfocusedBorderColor = Color(0xFF30363D),
                 focusedContainerColor = Color(0xFF161B22),
-                unfocusedContainerColor = Color(0xFF161B22)
+                unfocusedContainerColor = Color(0xFF161B22),
+                cursorColor = Color(0xFF00E5FF)
             )
         )
         Spacer(Modifier.width(12.dp))
