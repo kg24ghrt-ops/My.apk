@@ -70,7 +70,6 @@ fun PromptAppScreen() {
             .background(Brush.radialGradient(listOf(AccentCyan.copy(alpha = 0.15f), Color.Transparent))))
 
         Column(modifier = Modifier.fillMaxSize()) {
-            // Enhanced Header
             ModernTopHeader()
 
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
@@ -78,7 +77,6 @@ fun PromptAppScreen() {
                     errorMessage?.let { ErrorPanel(it) { vm.clearError() } }
                 }
 
-                // Command Center Area
                 Surface(
                     color = CardBg.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(20.dp),
@@ -96,7 +94,6 @@ fun PromptAppScreen() {
                 M3ImportRow(vm)
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Main Content Area with Animated Switcher
                 Box(modifier = Modifier.weight(1f)) {
                     AnimatedContent(
                         targetState = (bundledContent ?: activeTree ?: selectedContent),
@@ -206,7 +203,7 @@ private fun GlassFileCard(entity: PromptFileEntity, vm: PromptViewModel) {
     val scale by animateFloatAsState(if (isPressed) 0.97f else 1f, label = "")
 
     Surface(
-        onClick = { /* Detail view if needed */ },
+        onClick = { /* Detail logic */ },
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer(scaleX = scale, scaleY = scale),
@@ -216,7 +213,6 @@ private fun GlassFileCard(entity: PromptFileEntity, vm: PromptViewModel) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.Top) {
-                // Extension Badge
                 Box(
                     modifier = Modifier
                         .size(44.dp)
@@ -252,7 +248,6 @@ private fun GlassFileCard(entity: PromptFileEntity, vm: PromptViewModel) {
             Spacer(Modifier.height(16.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Secondary Action
                 TextButton(
                     onClick = { vm.loadFilePreview(entity) },
                     modifier = Modifier.weight(1f),
@@ -262,7 +257,6 @@ private fun GlassFileCard(entity: PromptFileEntity, vm: PromptViewModel) {
                     Text("INSPECT", style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp))
                 }
 
-                // Primary Action: Glow Button
                 Button(
                     onClick = { vm.prepareAIContext(entity) },
                     modifier = Modifier.weight(1.2f).shadow(elevation = 8.dp, ambientColor = AccentCyan, spotColor = AccentCyan),
@@ -287,7 +281,6 @@ private fun IDEPreviewPanel(title: String, content: String, onClose: () -> Unit,
             .background(Color(0xFF0D1117))
             .border(1.dp, BorderColor, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
     ) {
-        // Toolbar
         Row(
             modifier = Modifier.fillMaxWidth().background(Color(0xFF161B22)).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -304,13 +297,11 @@ private fun IDEPreviewPanel(title: String, content: String, onClose: () -> Unit,
             }
         }
 
-        // Code Area
         Box(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 val lines = content.lines()
                 items(lines.size) { index ->
                     Row {
-                        // Line Number Gutter
                         Text(
                             text = (index + 1).toString().padStart(3, ' '),
                             color = Color.DarkGray,
@@ -318,7 +309,6 @@ private fun IDEPreviewPanel(title: String, content: String, onClose: () -> Unit,
                             modifier = Modifier.width(30.dp).padding(top = 2.dp)
                         )
                         Spacer(Modifier.width(12.dp))
-                        // Code Content
                         val line = lines[index]
                         Text(
                             text = line,
@@ -386,7 +376,6 @@ private fun ProcessingOverlay() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(
-                    progress = 0.7f,
                     modifier = Modifier.size(80.dp).graphicsLayer { rotationZ = rotation },
                     color = AccentCyan,
                     strokeWidth = 2.dp,
@@ -403,7 +392,6 @@ private fun ProcessingOverlay() {
     }
 }
 
-// Re-using ConfigChip from original but with stylized updates
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConfigChip(label: String, selected: Boolean, onToggle: (Boolean) -> Unit) {
@@ -417,6 +405,8 @@ private fun ConfigChip(label: String, selected: Boolean, onToggle: (Boolean) -> 
             selectedLabelColor = AccentCyan
         ),
         border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
             selectedBorderColor = AccentCyan,
             borderColor = BorderColor,
             borderWidth = 1.dp,
@@ -479,17 +469,17 @@ private fun EmptyWorkspaceState() {
 @Composable
 private fun ErrorPanel(msg: String, onDismiss: () -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        color = Color(0xFF440000),
+        color = Color(0xFF3D1919),
         shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, Color.Red)
+        border = BorderStroke(1.dp, Color(0xFFF85149).copy(alpha = 0.2f)),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
     ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Warning, null, tint = Color.Red, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.ErrorOutline, null, tint = Color(0xFFF85149))
             Spacer(Modifier.width(12.dp))
-            Text(msg, color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-            IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-                Icon(Icons.Rounded.Close, null, tint = Color.White)
+            Text(msg, color = Color.White, modifier = Modifier.weight(1f), fontSize = 12.sp)
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(16.dp))
             }
         }
     }
