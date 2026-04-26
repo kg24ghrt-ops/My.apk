@@ -20,20 +20,20 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
+          # Temporarily comment out the cache to fix the "Zip" error
+          # cache: 'gradle' 
 
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
           ndk-version: '25.2.9519653' 
 
-      # FIX: Give permission to execute the gradle wrapper
-      - name: Grant Execute Permission for Gradlew
+      - name: Grant Execute Permission
         run: chmod +x gradlew
 
       - name: Build Android APK
-        # We use --no-daemon for CI to prevent hanging processes
-        run: ./gradlew assembleDebug --no-daemon
+        # Added 'clean' and '--refresh-dependencies' to kill corrupted zips
+        run: ./gradlew clean assembleDebug --refresh-dependencies --no-daemon --stacktrace
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
