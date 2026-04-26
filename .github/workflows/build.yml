@@ -40,6 +40,9 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
+      - name: Clear corrupted Gradle transforms cache
+        run: rm -rf ~/.gradle/caches/transforms-* || true
+
       - name: Fix permissions
         run: chmod +x gradlew
 
