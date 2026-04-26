@@ -1,0 +1,45 @@
+name: Build Psiphon Android
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive # Important: Psiphon uses submodules for the tunnel core
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21' # Psiphon needs modern Go
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+        with:
+          ndk-version: '25.2.9519653' # Check Psiphon's build.gradle for exact version
+
+      - name: Build Tunnel Core (Go Library)
+        run: |
+          # Psiphon typically provides a script to compile the Go core 
+          # into .so files for Android architectures (arm64, v7, etc.)
+          cd psiphon-tunnel-core
+          ./MobileLibrary/build-android.sh 
+
+      - name: Build Android APK
+        run: ./gradlew assembleDebug
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Psiphon-Debug-APK
+          path: app/build/outputs/apk/debug/*.apk
+          
