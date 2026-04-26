@@ -9,6 +9,10 @@
     ".yml": {
       "enabled": true,
       "run": "yaml-language-server --stdio"
+    },
+    ".gradle": {
+      "enabled": false,
+      "run": "groovy-language-server"
     }
   }
 }
