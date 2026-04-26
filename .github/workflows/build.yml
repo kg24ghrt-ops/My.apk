@@ -17,12 +17,15 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
 
       - name: Make gradlew executable
         run: chmod +x gradlew
 
       - name: Build APK
         run: ./gradlew assembleDebug
+        timeout-minutes: 30
+        continue-on-error: false
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
