@@ -27,12 +27,7 @@ jobs:
         with:
           ndk-version: '25.2.9519653' # Check Psiphon's build.gradle for exact version
 
-      - name: Build Tunnel Core (Go Library)
-        run: |
-          # Psiphon typically provides a script to compile the Go core 
-          # into .so files for Android architectures (arm64, v7, etc.)
-          cd psiphon-tunnel-core
-          ./MobileLibrary/build-android.sh 
+      
 
       - name: Build Android APK
         run: ./gradlew assembleDebug
