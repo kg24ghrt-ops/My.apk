@@ -8,12 +8,12 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: recursive # Important: Psiphon uses submodules for the tunnel core
+          submodules: recursive 
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21' # Psiphon needs modern Go
+          go-version: '1.21' 
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -25,16 +25,18 @@ jobs:
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
-          ndk-version: '25.2.9519653' # Check Psiphon's build.gradle for exact version
+          ndk-version: '25.2.9519653' 
 
-      
+      # FIX: Give permission to execute the gradle wrapper
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
 
       - name: Build Android APK
-        run: ./gradlew assembleDebug
+        # We use --no-daemon for CI to prevent hanging processes
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Psiphon-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
-          
